@@ -2,9 +2,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.database import DbSession
+from app.database import AuthDbSession, DbSession, ReferenceDbSession
 from app.middleware.auth_middleware import get_session
 from app.models.salary import (
+    BuhSalaryDB,
     CategoryDB,
     EmployeeDB,
     EmployeeSalaryDB,
@@ -19,6 +20,8 @@ from app.models.salary import (
 )
 from app.repositories.session_repository import AuthenticatedSession
 from app.schemas import (
+    BuhSalaryCreate,
+    BuhSalaryUpdate,
     DictionaryCreate,
     DictionaryUpdate,
     EmployeeCreate,
@@ -27,6 +30,7 @@ from app.schemas import (
     EmployeeUpdate,
     EmploymentHistoryCreate,
     EmploymentHistoryUpdate,
+    MonthPeriod,
     NamedCreate,
     NamedUpdate,
     ObjectCreate,
@@ -54,22 +58,29 @@ def register_crud(
 ):
     router = APIRouter(prefix=prefix, tags=tags)
 
+    def get_service(db: DbSession, auth_db: AuthDbSession, reference_db: ReferenceDbSession):
+        return SalaryService(db, model, primary_key, auth_db, reference_db)
+
     def list_items(
         db: DbSession,
+        auth_db: AuthDbSession,
+        reference_db: ReferenceDbSession,
         limit: int = 100,
         offset: int = 0,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         _ = current_session
-        return SalaryService(db, model, primary_key).list(limit=limit, offset=offset)
+        return get_service(db, auth_db, reference_db).list(limit=limit, offset=offset)
 
     def get_item(
         item_id: str,
         db: DbSession,
+        auth_db: AuthDbSession,
+        reference_db: ReferenceDbSession,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         _ = current_session
-        data = SalaryService(db, model, primary_key).get(item_id)
+        data = get_service(db, auth_db, reference_db).get(item_id)
         if not data:
             raise HTTPException(status_code=404, detail="Запись не найдена")
         return data
@@ -77,11 +88,14 @@ def register_crud(
     def create_item(
         payload,
         db: DbSession,
+        auth_db: AuthDbSession,
+        reference_db: ReferenceDbSession,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         try:
-            return SalaryService(db, model, primary_key).create(
-                payload, current_session.user_id
+            return get_service(db, auth_db, reference_db).create(
+                payload,
+                current_session.user_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -90,11 +104,15 @@ def register_crud(
         item_id: str,
         payload,
         db: DbSession,
+        auth_db: AuthDbSession,
+        reference_db: ReferenceDbSession,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         try:
-            data = SalaryService(db, model, primary_key).update(
-                item_id, payload, current_session.user_id
+            data = get_service(db, auth_db, reference_db).update(
+                item_id,
+                payload,
+                current_session.user_id,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -105,11 +123,13 @@ def register_crud(
     def delete_item(
         item_id: str,
         db: DbSession,
+        auth_db: AuthDbSession,
+        reference_db: ReferenceDbSession,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         _ = current_session
         try:
-            data = SalaryService(db, model, primary_key).delete(item_id)
+            data = get_service(db, auth_db, reference_db).delete(item_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not data:
@@ -136,7 +156,38 @@ def register_crud(
     salary_router.include_router(router)
 
 
+@salary_router.get(
+    "/buh-salaries/report",
+    tags=["Бухгалтерские начисления"],
+    summary="Отчёт бухгалтерских начислений по периоду",
+)
+def get_buh_salary_report(
+    mounth_period: MonthPeriod,
+    year: int,
+    db: DbSession,
+    auth_db: AuthDbSession,
+    reference_db: ReferenceDbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    return SalaryService(
+        db,
+        BuhSalaryDB,
+        "id",
+        auth_db,
+        reference_db,
+    ).buh_salary_report(mounth_period, year)
+
+
 crud_resources: list[dict[str, Any]] = [
+    {
+        "prefix": "/buh-salaries",
+        "tags": ["Бухгалтерские начисления"],
+        "model": BuhSalaryDB,
+        "primary_key": "id",
+        "create_schema": BuhSalaryCreate,
+        "update_schema": BuhSalaryUpdate,
+    },
     {
         "prefix": "/categories",
         "tags": ["Категории"],

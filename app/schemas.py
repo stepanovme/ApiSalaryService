@@ -192,6 +192,26 @@ class OperationSalaryUpdate(SalarySchema):
     edit_by: Optional[str] = None
 
 
+class BuhSalaryCreate(SalarySchema):
+    id: Optional[str] = None
+    value: float
+    mounth_period: MonthPeriod
+    year: int
+    employee_id: str
+    type_id: int
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+
+
+class BuhSalaryUpdate(SalarySchema):
+    value: Optional[float] = None
+    mounth_period: Optional[MonthPeriod] = None
+    year: Optional[int] = None
+    employee_id: Optional[str] = None
+    type_id: Optional[int] = None
+    edit_by: Optional[str] = None
+
+
 class PersonCreate(SalarySchema):
     id: Optional[str] = None
     name: str

@@ -136,6 +136,37 @@ class OperationSalaryDB(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class BuhSalaryDB(Base):
+    __tablename__ = "buh_salary"
+
+    id = Column(CHAR(36), primary_key=True)
+    value = Column(Float, nullable=False)
+    mounth_period = Column(
+        Enum(
+            "jun",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "june",
+            "jul",
+            "aug",
+            "sep",
+            "oct",
+            "nov",
+            "dec",
+            native_enum=False,
+        ),
+        nullable=False,
+    )
+    year = Column(Integer, nullable=False)
+    employee_id = Column(CHAR(36), nullable=False)
+    created_by = Column(CHAR(36), nullable=False)
+    edit_by = Column(CHAR(36))
+    type_id = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 class PersonDB(Base):
     __tablename__ = "persons"
 
