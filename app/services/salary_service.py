@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from calendar import monthrange
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -19,12 +20,14 @@ class SalaryService:
         primary_key: str,
         auth_db: Session,
         reference_db: Session,
+        timetrack_db: Session | None = None,
     ) -> None:
         self.db = db
         self.model = model
         self.primary_key = primary_key
         self.auth_db = auth_db
         self.reference_db = reference_db
+        self.timetrack_db = timetrack_db
         self._cache: dict[tuple[str, Any], Any] = {}
 
     def list(self, limit: int = 100, offset: int = 0):
@@ -208,6 +211,163 @@ class SalaryService:
             "counterparties": list(grouped.values()),
         }
 
+    def director_salary_report(self, mounth_period: str, year: int):
+        if self.timetrack_db is None:
+            raise ValueError("Не подключена БД timetrack_service")
+
+        period_start, period_end = self._month_bounds(mounth_period, year)
+        rows = self.db.execute(
+            text(
+                """
+                SELECT
+                    eh.counterparties_id,
+                    eh.department,
+                    eh.position,
+                    eh.start_date,
+                    eh.end_date,
+                    e.id AS employee_id,
+                    e.name,
+                    e.surname,
+                    e.patronymic,
+                    e.userId,
+                    e.marker
+                FROM employment_history eh
+                JOIN employee e ON e.id = eh.employee_id
+                WHERE eh.start_date <= :period_end
+                  AND (eh.end_date IS NULL OR eh.end_date >= :period_start)
+                ORDER BY eh.counterparties_id, e.surname, e.name
+                """
+            ),
+            {"period_start": period_start, "period_end": period_end},
+        ).mappings().all()
+
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            counterparty_id = row["counterparties_id"]
+            group = grouped.setdefault(
+                counterparty_id,
+                {
+                    "counterparties_id": counterparty_id,
+                    "counterparties_name": self._get_reference_name(
+                        "counterparties", counterparty_id
+                    ),
+                    "total_salary_accrued": 0,
+                    "total_paid": 0,
+                    "total_remaining": 0,
+                    "employees": [],
+                },
+            )
+
+            employee = self._serialize_report_employee(row)
+            metrics = self._director_employee_metrics(
+                employee_id=row["employee_id"],
+                user_id=row["userId"],
+                mounth_period=mounth_period,
+                year=year,
+                period_start=period_start,
+                period_end=period_end,
+                apply_overpayment=True,
+            )
+            item = {
+                "employee": employee,
+                "department": row["department"],
+                "position": row["position"],
+                "employment_start_date": row["start_date"],
+                "employment_end_date": row["end_date"],
+                **metrics,
+            }
+            group["employees"].append(item)
+            group["total_salary_accrued"] += metrics["salary_accrued"]
+            group["total_paid"] += metrics["paid_total_with_overpayment"]
+            group["total_remaining"] += metrics["remaining"]
+
+        return {
+            "mounth_period": mounth_period,
+            "year": year,
+            "period_start": period_start,
+            "period_end": period_end,
+            "counterparties": list(grouped.values()),
+        }
+
+    def _director_employee_metrics(
+        self,
+        *,
+        employee_id: str,
+        user_id: str | None,
+        mounth_period: str,
+        year: int,
+        period_start: date,
+        period_end: date,
+        apply_overpayment: bool,
+    ) -> dict[str, Any]:
+        user = self._get_auth_user(user_id) if user_id else None
+        gender_id = user.get("gender_id") if user else None
+        standard_hours = (
+            self._get_standard_hours(user_id, gender_id, mounth_period, year)
+            if user_id and gender_id
+            else None
+        )
+        worked_hours = (
+            self._get_worked_hours(user_id, period_start, period_end)
+            if user_id
+            else None
+        )
+        vacation_days = (
+            self._get_vacation_days(user_id, period_start, period_end)
+            if user_id
+            else None
+        )
+        sick_days = (
+            self._get_sick_days(user_id, period_start, period_end)
+            if user_id
+            else None
+        )
+        salary = self._get_employee_salary(employee_id, period_start, period_end)
+        salary_total = self._calculate_salary_total(salary, standard_hours)
+        salary_accrued = self._calculate_salary_accrued(
+            salary,
+            standard_hours,
+            worked_hours,
+        )
+        vacation_total = self._calculate_vacation_total(
+            salary,
+            standard_hours,
+            vacation_days,
+        )
+        advance = self._sum_operations_salary(employee_id, mounth_period, year, 5)
+        bonus = self._sum_operations_salary(employee_id, mounth_period, year, 7)
+        buh_total = self._sum_buh_salary(employee_id, mounth_period, year)
+        vacation_buh = self._sum_buh_salary(employee_id, mounth_period, year, 4)
+        vacation_ev = vacation_total - vacation_buh
+        paid_total = self._sum_operations_salary(employee_id, mounth_period, year)
+        overpayment = (
+            self._get_previous_overpayment(employee_id, mounth_period, year)
+            if apply_overpayment
+            else None
+        )
+        overpayment_value = overpayment["amount"] if overpayment else 0
+        paid_total_with_overpayment = paid_total + overpayment_value
+
+        return {
+            "standard_hours": standard_hours,
+            "worked_hours": worked_hours,
+            "vacation_days": vacation_days,
+            "sick_days": sick_days,
+            "salary": salary,
+            "salary_total": salary_total,
+            "salary_accrued": salary_accrued,
+            "advance": advance,
+            "bonus": bonus,
+            "buh_total": buh_total,
+            "vacation_total": vacation_total,
+            "vacation_buh": vacation_buh,
+            "vacation_ev": vacation_ev,
+            "paid_total": paid_total,
+            "overpayment_applied": overpayment,
+            "paid_total_with_overpayment": paid_total_with_overpayment,
+            "remaining": salary_accrued - paid_total_with_overpayment,
+        }
+
     def _find(self, row_id: Any):
         return (
             self.db.query(self.model)
@@ -331,7 +491,7 @@ class SalaryService:
             row = self.auth_db.execute(
                 text(
                     """
-                    SELECT id, name, surname, patronymic
+                    SELECT id, name, surname, patronymic, gender_id
                     FROM users
                     WHERE id = :user_id
                     LIMIT 1
@@ -345,6 +505,7 @@ class SalaryService:
                     "name": row["name"],
                     "surname": row["surname"],
                     "patronymic": row["patronymic"],
+                    "gender_id": row["gender_id"],
                     "full_name": self._full_name(
                         row["surname"], row["name"], row["patronymic"]
                     ),
@@ -405,6 +566,332 @@ class SalaryService:
             "userId": row["userId"],
             "user": user,
             "marker": row["marker"],
+        }
+
+    def _get_standard_hours(
+        self,
+        user_id: str,
+        gender_id: int | None,
+        mounth_period: str,
+        year: int,
+    ) -> float | None:
+        if self.timetrack_db is None or gender_id is None:
+            return None
+
+        month_number = self._month_number(mounth_period)
+        gender_column = self._first_existing_column(
+            self.timetrack_db, "work_standards", ("gender", "gender_id")
+        )
+        user_id_column = self._first_existing_column(
+            self.timetrack_db, "work_standards", ("user_id", "userId")
+        )
+        if not gender_column or not user_id_column:
+            return None
+
+        row = self.timetrack_db.execute(
+            text(
+                f"""
+                SELECT standard_hours
+                FROM work_standards
+                WHERE month = :month
+                  AND year = :year
+                  AND {gender_column} = :gender_id
+                  AND ({user_id_column} = :user_id OR {user_id_column} IS NULL)
+                ORDER BY CASE WHEN {user_id_column} = :user_id THEN 0 ELSE 1 END
+                LIMIT 1
+                """
+            ),
+            {
+                "month": month_number,
+                "year": year,
+                "gender_id": gender_id,
+                "user_id": user_id,
+            },
+        ).first()
+        return float(row[0]) if row and row[0] is not None else None
+
+    def _get_worked_hours(
+        self, user_id: str, period_start: date, period_end: date
+    ) -> float | None:
+        if self.timetrack_db is None:
+            return None
+
+        hours_column = self._first_existing_column(
+            self.timetrack_db,
+            "user_time_entries",
+            (
+                "hours_worked",
+                "hours",
+                "work_hours",
+                "worked_hours",
+                "duration_hours",
+                "value",
+            ),
+        )
+        if hours_column:
+            row = self.timetrack_db.execute(
+                text(
+                    f"""
+                    SELECT COALESCE(SUM({hours_column}), 0)
+                    FROM user_time_entries
+                    WHERE user_id = :user_id
+                      AND entry_date BETWEEN :period_start AND :period_end
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "period_start": period_start,
+                    "period_end": period_end,
+                },
+            ).first()
+            return float(row[0]) if row else 0
+
+        row = self.timetrack_db.execute(
+            text(
+                """
+                SELECT COUNT(*) * 8
+                FROM user_time_entries
+                WHERE user_id = :user_id
+                  AND entry_date BETWEEN :period_start AND :period_end
+                """
+            ),
+            {
+                "user_id": user_id,
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        ).first()
+        return float(row[0]) if row else 0
+
+    def _get_vacation_days(
+        self, user_id: str, period_start: date, period_end: date
+    ) -> int | None:
+        if self.timetrack_db is None:
+            return None
+
+        rows = self.timetrack_db.execute(
+            text(
+                """
+                SELECT start_date, end_date
+                FROM vacations
+                WHERE user_id = :user_id
+                  AND start_date <= :period_end
+                  AND end_date >= :period_start
+                """
+            ),
+            {
+                "user_id": user_id,
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        ).mappings().all()
+        total_days = 0
+        for row in rows:
+            start_date = max(self._as_date(row["start_date"]), period_start)
+            end_date = min(self._as_date(row["end_date"]), period_end)
+            total_days += (end_date - start_date).days + 1
+        return total_days
+
+    def _get_sick_days(self, user_id: str, period_start: date, period_end: date) -> int | None:
+        if self.timetrack_db is None:
+            return None
+
+        row = self.timetrack_db.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM user_time_entries
+                WHERE user_id = :user_id
+                  AND entry_date BETWEEN :period_start AND :period_end
+                  AND day_type_id = '48f5ccec-d661-11f0-b7e5-b05cda34b6c7'
+                """
+            ),
+            {
+                "user_id": user_id,
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        ).first()
+        return int(row[0]) if row else 0
+
+    def _get_employee_salary(
+        self, employee_id: str, period_start: date, period_end: date
+    ) -> dict[str, Any] | None:
+        row = self.db.execute(
+            text(
+                """
+                SELECT employee_salary_id, salary_mounth, salary_hours, start_date, end_date
+                FROM employee_salary
+                WHERE employee_id = :employee_id
+                  AND start_date <= :period_end
+                  AND (end_date IS NULL OR end_date >= :period_start)
+                ORDER BY start_date DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "employee_id": employee_id,
+                "period_start": period_start,
+                "period_end": period_end,
+            },
+        ).mappings().first()
+        if not row:
+            return None
+        return {
+            "employee_salary_id": row["employee_salary_id"],
+            "salary_mounth": (
+                float(row["salary_mounth"]) if row["salary_mounth"] is not None else None
+            ),
+            "salary_hours": (
+                float(row["salary_hours"]) if row["salary_hours"] is not None else None
+            ),
+            "start_date": row["start_date"],
+            "end_date": row["end_date"],
+        }
+
+    def _calculate_salary_total(
+        self, salary: dict[str, Any] | None, standard_hours: float | None
+    ) -> float:
+        if not salary:
+            return 0
+        if salary["salary_mounth"] is not None:
+            return salary["salary_mounth"]
+        if salary["salary_hours"] is not None and standard_hours is not None:
+            return salary["salary_hours"] * standard_hours
+        return 0
+
+    def _calculate_salary_accrued(
+        self,
+        salary: dict[str, Any] | None,
+        standard_hours: float | None,
+        worked_hours: float | None,
+    ) -> float:
+        if not salary or worked_hours is None:
+            return 0
+        if salary["salary_mounth"] is not None:
+            if not standard_hours:
+                return salary["salary_mounth"]
+            return salary["salary_mounth"] / standard_hours * worked_hours
+        if salary["salary_hours"] is not None:
+            return salary["salary_hours"] * worked_hours
+        return 0
+
+    def _calculate_vacation_total(
+        self,
+        salary: dict[str, Any] | None,
+        standard_hours: float | None,
+        vacation_days: int | None,
+    ) -> float:
+        if not salary or vacation_days is None:
+            return 0
+        if salary["salary_mounth"] is not None:
+            if not standard_hours:
+                return 0
+            return salary["salary_mounth"] / standard_hours * 8 * vacation_days
+        if salary["salary_hours"] is not None:
+            return salary["salary_hours"] * 8 * vacation_days
+        return 0
+
+    def _sum_operations_salary(
+        self,
+        employee_id: str,
+        mounth_period: str,
+        year: int,
+        type_id: int | None = None,
+    ) -> float:
+        type_filter = "AND type_id = :type_id" if type_id is not None else ""
+        params = {
+            "employee_id": employee_id,
+            "mounth_period": mounth_period,
+            "year": year,
+        }
+        if type_id is not None:
+            params["type_id"] = type_id
+        row = self.db.execute(
+            text(
+                f"""
+                SELECT COALESCE(SUM(value), 0)
+                FROM operations_salary
+                WHERE employee_id = :employee_id
+                  AND nounth_period = :mounth_period
+                  AND year = :year
+                  {type_filter}
+                """
+            ),
+            params,
+        ).first()
+        return float(row[0]) if row else 0
+
+    def _sum_buh_salary(
+        self,
+        employee_id: str,
+        mounth_period: str,
+        year: int,
+        type_id: int | None = None,
+    ) -> float:
+        type_filter = "AND type_id = :type_id" if type_id is not None else ""
+        params = {
+            "employee_id": employee_id,
+            "mounth_period": mounth_period,
+            "year": year,
+        }
+        if type_id is not None:
+            params["type_id"] = type_id
+        row = self.db.execute(
+            text(
+                f"""
+                SELECT COALESCE(SUM(value), 0)
+                FROM buh_salary
+                WHERE employee_id = :employee_id
+                  AND mounth_period = :mounth_period
+                  AND year = :year
+                  {type_filter}
+                """
+            ),
+            params,
+        ).first()
+        return float(row[0]) if row else 0
+
+    def _get_previous_overpayment(
+        self, employee_id: str, mounth_period: str, year: int
+    ) -> dict[str, Any] | None:
+        previous = self._previous_month(mounth_period, year)
+        if previous is None:
+            return None
+
+        previous_period, previous_year = previous
+        employee_row = self.db.execute(
+            text(
+                """
+                SELECT id AS employee_id, name, surname, patronymic, userId, marker
+                FROM employee
+                WHERE id = :employee_id
+                LIMIT 1
+                """
+            ),
+            {"employee_id": employee_id},
+        ).mappings().first()
+        if not employee_row:
+            return None
+
+        period_start, period_end = self._month_bounds(previous_period, previous_year)
+        metrics = self._director_employee_metrics(
+            employee_id=employee_id,
+            user_id=employee_row["userId"],
+            mounth_period=previous_period,
+            year=previous_year,
+            period_start=period_start,
+            period_end=period_end,
+            apply_overpayment=False,
+        )
+        overpayment = metrics["paid_total"] - metrics["salary_accrued"]
+        if overpayment <= 0:
+            return None
+        return {
+            "amount": overpayment,
+            "from_mounth_period": previous_period,
+            "from_year": previous_year,
+            "reason": "Переплата прошлого периода учтена как оплаченная сумма",
         }
 
     def _get_person(self, person_id: str) -> dict[str, Any] | None:
@@ -493,10 +980,7 @@ class SalaryService:
         return getattr(column.type, "length", None) == 36
 
     @staticmethod
-    def _month_bounds(mounth_period: str, year: int):
-        from calendar import monthrange
-        from datetime import date
-
+    def _month_number(mounth_period: str) -> int:
         month_numbers = {
             "jun": 1,
             "feb": 2,
@@ -511,7 +995,57 @@ class SalaryService:
             "nov": 11,
             "dec": 12,
         }
-        month_number = month_numbers[mounth_period]
+        return month_numbers[mounth_period]
+
+    @classmethod
+    def _previous_month(cls, mounth_period: str, year: int) -> tuple[str, int] | None:
+        month_number = cls._month_number(mounth_period)
+        if month_number == 1:
+            return "dec", year - 1
+
+        periods_by_month = {
+            1: "jun",
+            2: "feb",
+            3: "mar",
+            4: "apr",
+            5: "may",
+            6: "june",
+            7: "jul",
+            8: "aug",
+            9: "sep",
+            10: "oct",
+            11: "nov",
+            12: "dec",
+        }
+        return periods_by_month[month_number - 1], year
+
+    def _first_existing_column(
+        self, db: Session, table_name: str, candidates: tuple[str, ...]
+    ) -> str | None:
+        cache_key = ("columns", db.bind.url.database if db.bind else "", table_name)
+        if cache_key not in self._cache:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = :table_name
+                    """
+                ),
+                {"table_name": table_name},
+            ).fetchall()
+            self._cache[cache_key] = {row[0] for row in rows}
+        columns = self._cache[cache_key]
+        return next((column for column in candidates if column in columns), None)
+
+    @staticmethod
+    def _as_date(value: date | datetime) -> date:
+        return value.date() if isinstance(value, datetime) else value
+
+    @staticmethod
+    def _month_bounds(mounth_period: str, year: int):
+        month_number = SalaryService._month_number(mounth_period)
         return (
             date(year, month_number, 1),
             date(year, month_number, monthrange(year, month_number)[1]),

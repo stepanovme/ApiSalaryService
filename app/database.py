@@ -28,14 +28,26 @@ REFERENCE_DB_URL = (
     f"/{os.getenv('REFERENCE_DB_NAME', 'reference_service')}"
 )
 
+TIMETRACK_DB_URL = (
+    f"mysql+pymysql://{os.getenv('TIMETRACK_DB_USER', os.getenv('DB_USER'))}"
+    f":{os.getenv('TIMETRACK_DB_PASSWORD', os.getenv('DB_PASSWORD'))}"
+    f"@{os.getenv('TIMETRACK_DB_HOST', os.getenv('DB_HOST'))}"
+    f":{os.getenv('TIMETRACK_DB_PORT', os.getenv('DB_PORT'))}"
+    f"/{os.getenv('TIMETRACK_DB_NAME', 'timetrack_service')}"
+)
+
 salary_engine = create_engine(SALARY_DB_URL)
 auth_engine = create_engine(AUTH_DB_URL)
 reference_engine = create_engine(REFERENCE_DB_URL)
+timetrack_engine = create_engine(TIMETRACK_DB_URL)
 
 SalarySessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=salary_engine)
 AuthSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=auth_engine)
 ReferenceSessionLocal = sessionmaker(
     autocommit=False, autoflush=False, bind=reference_engine
+)
+TimetrackSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=timetrack_engine
 )
 
 
@@ -71,6 +83,14 @@ def get_reference_db() -> Generator[Session, None, None]:  # pyright: ignore[rep
         db.close()
 
 
+def get_timetrack_db() -> Generator[Session, None, None]:  # pyright: ignore[reportInvalidTypeForm]
+    db = TimetrackSessionLocal()
+    try:
+        yield db  # pyright: ignore[reportReturnType]
+    finally:
+        db.close()
+
+
 def init_db():
     """Create salary tables explicitly when needed.
 
@@ -83,3 +103,4 @@ def init_db():
 DbSession = Annotated[Session, Depends(get_db)]
 AuthDbSession = Annotated[Session, Depends(get_auth_db)]
 ReferenceDbSession = Annotated[Session, Depends(get_reference_db)]
+TimetrackDbSession = Annotated[Session, Depends(get_timetrack_db)]

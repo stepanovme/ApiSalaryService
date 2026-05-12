@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.database import AuthDbSession, DbSession, ReferenceDbSession
+from app.database import AuthDbSession, DbSession, ReferenceDbSession, TimetrackDbSession
 from app.middleware.auth_middleware import get_session
 from app.models.salary import (
     BuhSalaryDB,
@@ -177,6 +177,34 @@ def get_buh_salary_report(
         auth_db,
         reference_db,
     ).buh_salary_report(mounth_period, year)
+
+
+@salary_router.get(
+    "/director-salaries/report",
+    tags=["Директорская зарплата"],
+    summary="Директорский отчёт по зарплате за период",
+)
+def get_director_salary_report(
+    mounth_period: MonthPeriod,
+    year: int,
+    db: DbSession,
+    auth_db: AuthDbSession,
+    reference_db: ReferenceDbSession,
+    timetrack_db: TimetrackDbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    try:
+        return SalaryService(
+            db,
+            EmployeeDB,
+            "id",
+            auth_db,
+            reference_db,
+            timetrack_db,
+        ).director_salary_report(mounth_period, year)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 crud_resources: list[dict[str, Any]] = [
