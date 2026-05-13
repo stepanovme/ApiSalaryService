@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from app.database import AuthDbSession, DbSession, ReferenceDbSession, TimetrackDbSession
 from app.middleware.auth_middleware import get_session
@@ -300,19 +300,44 @@ def download_file(
     data = FileService(db).get_file(file_id)
     if not data:
         raise HTTPException(status_code=404, detail="Файл не найден")
+    download_name = data["original_name"] or Path(data["file_path"]).name
+    return RedirectResponse(
+        url=f"/api/salary/files/{file_id}/download/{quote(download_name, safe='')}",
+        status_code=302,
+    )
+
+
+@salary_router.get(
+    "/files/{file_id}/download/{download_name}",
+    tags=["Файлы"],
+    summary="Скачать файл с оригинальным именем в URL",
+)
+def download_file_by_name(
+    file_id: str,
+    download_name: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    data = FileService(db).get_file(file_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Файл не найден")
     file_path = Path(data["file_path"])
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
-    download_name = data["original_name"] or file_path.name
-    fallback_name = _ascii_download_name(download_name)
+    original_name = data["original_name"] or download_name or file_path.name
+    fallback_name = _ascii_download_name(original_name)
     disposition = (
         f'attachment; filename="{fallback_name}"; '
-        f"filename*=UTF-8''{quote(download_name, safe='')}"
+        f"filename*=UTF-8''{quote(original_name, safe='')}"
     )
     return FileResponse(
         path=file_path,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": disposition},
+        headers={
+            "Content-Disposition": disposition,
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
     )
 
 
