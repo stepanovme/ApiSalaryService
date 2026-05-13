@@ -347,6 +347,12 @@ class SalaryService:
         )
         overpayment_value = overpayment["amount"] if overpayment else 0
         paid_total_with_overpayment = paid_total + overpayment_value
+        if user_id is None:
+            salary_accrued = salary_total
+
+        remaining = salary_accrued - paid_total_with_overpayment
+        if user_id is None and salary_total == 0 and buh_total > 0 and remaining < 0:
+            remaining = 0
 
         return {
             "standard_hours": standard_hours,
@@ -365,7 +371,7 @@ class SalaryService:
             "paid_total": paid_total,
             "overpayment_applied": overpayment,
             "paid_total_with_overpayment": paid_total_with_overpayment,
-            "remaining": salary_accrued - paid_total_with_overpayment,
+            "remaining": remaining,
         }
 
     def _find(self, row_id: Any):
