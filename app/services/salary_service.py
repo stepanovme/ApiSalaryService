@@ -330,8 +330,7 @@ class SalaryService:
             worked_hours,
         )
         vacation_total = self._calculate_vacation_total(
-            salary,
-            standard_hours,
+            salary_total,
             vacation_days,
         )
         advance = self._sum_operations_salary(employee_id, mounth_period, year, 5)
@@ -355,6 +354,11 @@ class SalaryService:
         remaining = salary_accrued - paid_total_with_overpayment
         if user_id is None and salary_total == 0 and buh_total > 0 and remaining < 0:
             remaining = 0
+
+        salary_accrued = self._money(salary_accrued)
+        vacation_total = self._money(vacation_total)
+        vacation_ev = self._money(vacation_ev)
+        remaining = self._money(remaining)
 
         return {
             "standard_hours": standard_hours,
@@ -786,19 +790,12 @@ class SalaryService:
 
     def _calculate_vacation_total(
         self,
-        salary: dict[str, Any] | None,
-        standard_hours: float | None,
+        salary_total: float,
         vacation_days: int | None,
     ) -> float:
-        if not salary or vacation_days is None:
+        if vacation_days is None:
             return 0
-        if salary["salary_mounth"] is not None:
-            if not standard_hours:
-                return 0
-            return salary["salary_mounth"] / standard_hours * 8 * vacation_days
-        if salary["salary_hours"] is not None:
-            return salary["salary_hours"] * 8 * vacation_days
-        return 0
+        return salary_total / 30 * vacation_days
 
     def _sum_operations_salary(
         self,
@@ -1050,6 +1047,10 @@ class SalaryService:
     @staticmethod
     def _as_date(value: date | datetime) -> date:
         return value.date() if isinstance(value, datetime) else value
+
+    @staticmethod
+    def _money(value: float) -> float:
+        return round(float(value), 2)
 
     @staticmethod
     def _month_bounds(mounth_period: str, year: int):
