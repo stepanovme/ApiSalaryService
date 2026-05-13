@@ -345,7 +345,7 @@ class SalaryService:
             if apply_overpayment
             else None
         )
-        if user_id is None and salary_total == 0 and buh_total > 0:
+        if user_id is None and salary_total == 0:
             overpayment = None
         overpayment_value = overpayment["amount"] if overpayment else 0
         paid_total_with_overpayment = paid_total + overpayment_value
