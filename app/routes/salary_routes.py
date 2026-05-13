@@ -1,5 +1,7 @@
+import re
 from typing import Any
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -301,10 +303,16 @@ def download_file(
     file_path = Path(data["file_path"])
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
+    download_name = data["original_name"] or file_path.name
+    fallback_name = _ascii_download_name(download_name)
+    disposition = (
+        f'attachment; filename="{fallback_name}"; '
+        f"filename*=UTF-8''{quote(download_name, safe='')}"
+    )
     return FileResponse(
         path=file_path,
-        filename=data["original_name"],
         media_type="application/octet-stream",
+        headers={"Content-Disposition": disposition},
     )
 
 
@@ -342,6 +350,15 @@ def delete_file(
     if not data:
         raise HTTPException(status_code=404, detail="Файл не найден")
     return data
+
+
+def _ascii_download_name(file_name: str) -> str:
+    suffix = Path(file_name).suffix
+    stem = Path(file_name).stem or "file"
+    fallback = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "file"
+    if suffix and not fallback.endswith(suffix):
+        fallback = f"{fallback}{suffix}"
+    return fallback
 
 
 crud_resources: list[dict[str, Any]] = [
