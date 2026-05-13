@@ -481,6 +481,9 @@ class SalaryService:
                 "financial_sources", "id", data["financial_source_id"]
             )
 
+        if data.get("file_id"):
+            data["file"] = self._get_file(data["file_id"])
+
         if data.get("method_pay"):
             data["method_pay_name"] = self._get_named_salary_row(
                 "method", "id", data["method_pay"]
@@ -943,6 +946,28 @@ class SalaryService:
                 {"row_id": row_id},
             ).first()
             self._cache[cache_key] = row[0] if row else None
+        return self._cache[cache_key]
+
+    def _get_file(self, file_id: str) -> dict[str, Any] | None:
+        cache_key = ("file", file_id)
+        if cache_key not in self._cache:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT id, original_name, storage_name, file_path, uploaded_by, uploaded_at
+                    FROM files
+                    WHERE id = :file_id
+                    LIMIT 1
+                    """
+                ),
+                {"file_id": file_id},
+            ).mappings().first()
+            if row:
+                data = dict(row)
+                data["uploaded_by_user"] = self._get_auth_user(data["uploaded_by"])
+                self._cache[cache_key] = data
+            else:
+                self._cache[cache_key] = None
         return self._cache[cache_key]
 
     def _get_object_name(self, object_id: str) -> str | None:

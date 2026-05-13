@@ -1,6 +1,9 @@
 from typing import Any
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app.database import AuthDbSession, DbSession, ReferenceDbSession, TimetrackDbSession
 from app.middleware.auth_middleware import get_session
@@ -43,6 +46,8 @@ from app.schemas import (
     PersonUpdate,
 )
 from app.services.salary_service import SalaryService
+from app.services.mistral_service import MistralOperationDraftService
+from app.services.file_service import FileService
 
 salary_router = APIRouter()
 
@@ -205,6 +210,138 @@ def get_director_salary_report(
         ).director_salary_report(mounth_period, year)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@salary_router.post(
+    "/operations/ai-draft",
+    tags=["Операции"],
+    summary="AI-черновик операции из текста или файла",
+)
+async def create_operation_ai_draft(
+    db: DbSession,
+    prompt: str | None = Form(default=None),
+    file: UploadFile | None = File(default=None),
+    photo: UploadFile | None = File(default=None),
+    receipt: UploadFile | None = File(default=None),
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    upload = file or photo or receipt
+    file_name = upload.filename if upload else None
+    content_type = upload.content_type if upload else None
+    file_bytes = await upload.read() if upload else None
+    if not prompt and not file_bytes:
+        raise HTTPException(status_code=400, detail="Передайте prompt или файл")
+
+    service = MistralOperationDraftService(db)
+    try:
+        return await service.create_operation_draft(
+            prompt=prompt,
+            file_name=file_name,
+            content_type=content_type,
+            file_bytes=file_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Mistral API error: {exc.response.status_code} {exc.response.text}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Mistral API error: {exc}") from exc
+
+
+@salary_router.get(
+    "/files",
+    tags=["Файлы"],
+    summary="Список файлов",
+)
+def list_files(
+    db: DbSession,
+    limit: int = 100,
+    offset: int = 0,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    return FileService(db).list_files(limit=limit, offset=offset)
+
+
+@salary_router.get(
+    "/files/{file_id}",
+    tags=["Файлы"],
+    summary="Получить информацию о файле",
+)
+def get_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    data = FileService(db).get_file(file_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return data
+
+
+@salary_router.get(
+    "/files/{file_id}/download",
+    tags=["Файлы"],
+    summary="Скачать файл",
+)
+def download_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    data = FileService(db).get_file(file_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    file_path = Path(data["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
+    return FileResponse(
+        path=file_path,
+        filename=data["original_name"],
+        media_type="application/octet-stream",
+    )
+
+
+@salary_router.post(
+    "/files",
+    tags=["Файлы"],
+    summary="Загрузить файл",
+)
+async def upload_file(
+    db: DbSession,
+    file: UploadFile = File(...),
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    if not current_session.user_id:
+        raise HTTPException(status_code=400, detail="Не удалось определить uploaded_by")
+    return FileService(db).upload_file(
+        original_name=file.filename or "file",
+        uploaded_by=current_session.user_id,
+        file_stream=file.file,
+    )
+
+
+@salary_router.delete(
+    "/files/{file_id}",
+    tags=["Файлы"],
+    summary="Удалить файл",
+)
+def delete_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    data = FileService(db).delete_file(file_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return data
 
 
 crud_resources: list[dict[str, Any]] = [

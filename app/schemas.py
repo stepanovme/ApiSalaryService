@@ -149,6 +149,7 @@ class OperationCreate(SalarySchema):
     coment: Optional[str] = None
     object_id: Optional[str] = None
     financial_source_id: Optional[str] = None
+    file_id: Optional[str] = None
     created_at: Optional[datetime] = None
     created_by: Optional[str] = None
     edit_by: Optional[str] = None
@@ -165,6 +166,7 @@ class OperationUpdate(SalarySchema):
     coment: Optional[str] = None
     object_id: Optional[str] = None
     financial_source_id: Optional[str] = None
+    file_id: Optional[str] = None
     edit_by: Optional[str] = None
 
 

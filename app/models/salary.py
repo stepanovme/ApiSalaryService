@@ -66,6 +66,17 @@ class FinancialSourceDB(AuditMixin, Base):
     name = Column(String(100), nullable=False)
 
 
+class FileDB(Base):
+    __tablename__ = "files"
+
+    id = Column(CHAR(36), primary_key=True)
+    original_name = Column(String(300), nullable=False)
+    storage_name = Column(String(300), nullable=False)
+    file_path = Column(Text, nullable=False)
+    uploaded_by = Column(CHAR(36), nullable=False)
+    uploaded_at = Column(DateTime, nullable=False)
+
+
 class MethodDB(AuditMixin, Base):
     __tablename__ = "method"
 
@@ -98,6 +109,7 @@ class OperationDB(Base):
     coment = Column(Text)
     object_id = Column(CHAR(36))
     financial_source_id = Column(CHAR(36))
+    file_id = Column(CHAR(36))
     created_at = Column(DateTime, nullable=False)
     created_by = Column(CHAR(36), nullable=False)
     edit_by = Column(CHAR(36), nullable=False)
