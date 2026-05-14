@@ -22,6 +22,11 @@ class OperationKind(StrEnum):
     expenditure = "expenditure"
 
 
+class ReceiptStatus(StrEnum):
+    paid = "paid"
+    not_paid = "not_paid"
+
+
 class MonthPeriod(StrEnum):
     jun = "jun"
     feb = "feb"
@@ -228,3 +233,87 @@ class PersonUpdate(SalarySchema):
     surname: Optional[str] = None
     patronymic: Optional[str] = None
     edit_by: Optional[str] = None
+
+
+class ReceiptListCreate(SalarySchema):
+    id: Optional[int] = None
+    name: str
+    user_id: Optional[str] = None
+
+
+class ReceiptListUpdate(SalarySchema):
+    name: Optional[str] = None
+    user_id: Optional[str] = None
+
+
+class ReceiptCreate(SalarySchema):
+    id: Optional[int] = None
+    store_name: Optional[str] = None
+    retailPlaceAddress: Optional[str] = None
+    fiscalDriveNumber: Optional[str] = None
+    fiscalDocumentNumber: Optional[str] = None
+    fiscalSign: Optional[str] = None
+    date: Optional[date] = None
+    inn: Optional[str] = None
+    sum: Optional[float] = None
+    user_id: Optional[str] = None
+    receipt_list_id: int
+    status: Optional[ReceiptStatus] = None
+    created_at: Optional[datetime] = None
+
+
+class ReceiptUpdate(SalarySchema):
+    store_name: Optional[str] = None
+    retailPlaceAddress: Optional[str] = None
+    fiscalDriveNumber: Optional[str] = None
+    fiscalDocumentNumber: Optional[str] = None
+    fiscalSign: Optional[str] = None
+    date: Optional[date] = None
+    inn: Optional[str] = None
+    sum: Optional[float] = None
+    user_id: Optional[str] = None
+    receipt_list_id: Optional[int] = None
+    status: Optional[ReceiptStatus] = None
+
+
+class ReceiptCategoryCreate(SalarySchema):
+    id: Optional[int] = None
+    receipt_id: int
+    category_id: str
+
+
+class ReceiptCategoryUpdate(SalarySchema):
+    receipt_id: Optional[int] = None
+    category_id: Optional[str] = None
+
+
+class ReceiptItemCreate(SalarySchema):
+    id: Optional[int] = None
+    receipt_id: Optional[int] = None
+    name: Optional[str] = None
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    nds: Optional[int] = None
+    nds_sum: Optional[float] = None
+    sum: Optional[float] = None
+
+
+class ReceiptItemUpdate(SalarySchema):
+    receipt_id: Optional[int] = None
+    name: Optional[str] = None
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    nds: Optional[int] = None
+    nds_sum: Optional[float] = None
+    sum: Optional[float] = None
+
+
+class ReceiptListViewCreate(SalarySchema):
+    id: Optional[int] = None
+    receipt_list_id: int
+    user_id: Optional[str] = None
+
+
+class ReceiptListViewUpdate(SalarySchema):
+    receipt_list_id: Optional[int] = None
+    user_id: Optional[str] = None

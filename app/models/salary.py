@@ -191,6 +191,61 @@ class PersonDB(Base):
     edit_by = Column(CHAR(36))
 
 
+class ReceiptListDB(Base):
+    __tablename__ = "receipt_list"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    user_id = Column(CHAR(36), nullable=False)
+
+
+class ReceiptDB(Base):
+    __tablename__ = "receipt"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    store_name = Column(Text)
+    retailPlaceAddress = Column(Text)
+    fiscalDriveNumber = Column(String(300))
+    fiscalDocumentNumber = Column(String(300))
+    fiscalSign = Column(String(300))
+    date = Column(Date)
+    inn = Column(String(100))
+    sum = Column(Float)
+    user_id = Column(CHAR(36), nullable=False)
+    receipt_list_id = Column(Integer, nullable=False)
+    status = Column(Enum("paid", "not_paid", native_enum=False))
+    created_at = Column(DateTime)
+
+
+class ReceiptCategoryDB(Base):
+    __tablename__ = "receipt_category"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receipt_id = Column(Integer, nullable=False)
+    category_id = Column(CHAR(36), nullable=False)
+
+
+class ReceiptItemDB(Base):
+    __tablename__ = "receipt_item"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receipt_id = Column(Integer)
+    name = Column(Text)
+    quantity = Column(Float)
+    price = Column(Float)
+    nds = Column(Integer)
+    nds_sum = Column(Float)
+    sum = Column(Float)
+
+
+class ReceiptListViewDB(Base):
+    __tablename__ = "receipt_list_view"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    receipt_list_id = Column(Integer, nullable=False)
+    user_id = Column(CHAR(36), nullable=False)
+
+
 class TypeDB(AuditMixin, Base):
     __tablename__ = "type"
 

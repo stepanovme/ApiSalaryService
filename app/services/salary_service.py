@@ -30,13 +30,27 @@ class SalaryService:
         self.timetrack_db = timetrack_db
         self._cache: dict[tuple[str, Any], Any] = {}
 
-    def list(self, limit: int = 100, offset: int = 0):
-        rows = self.db.query(self.model).offset(offset).limit(limit).all()
+    def list(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        filters: dict[str, Any] | None = None,
+    ):
+        query = self.db.query(self.model)
+        for field, value in (filters or {}).items():
+            if value is not None and self._has_column(field):
+                query = query.filter(getattr(self.model, field) == value)
+        rows = query.offset(offset).limit(limit).all()
         return [self._serialize(row) for row in rows]
 
     def get(self, row_id: Any):
         row = self._find(row_id)
-        return self._serialize(row) if row else None
+        if not row:
+            return None
+        data = self._serialize(row)
+        if self.model.__tablename__ == "receipt":
+            data["items"] = self._get_receipt_items(data["id"])
+        return data
 
     def create(self, payload: BaseModel, actor_id: str | None):
         data = payload.model_dump(exclude_none=True)
@@ -395,6 +409,11 @@ class SalaryService:
         if self._has_column("created_at") and "created_at" not in data:
             data["created_at"] = datetime.utcnow()
 
+        if self._has_column("user_id"):
+            data["user_id"] = data.get("user_id") or actor_id
+            if not data["user_id"]:
+                raise ValueError("Не удалось определить user_id из session")
+
         if self._has_column("created_by"):
             data["created_by"] = data.get("created_by") or actor_id
             if not data["created_by"]:
@@ -454,6 +473,9 @@ class SalaryService:
             if data.get(field):
                 data[f"{field}_user"] = self._get_auth_user(data[field])
 
+        if data.get("user_id"):
+            data["user"] = self._get_auth_user(data["user_id"])
+
         if data.get("employee_id"):
             data["employee"] = self._get_employee(data["employee_id"])
 
@@ -483,6 +505,15 @@ class SalaryService:
 
         if data.get("file_id"):
             data["file"] = self._get_file(data["file_id"])
+
+        if data.get("receipt_list_id"):
+            data["receipt_list"] = self._get_receipt_list(data["receipt_list_id"])
+
+        if data.get("receipt_id"):
+            data["receipt"] = self._get_receipt(data["receipt_id"])
+
+        if self.model.__tablename__ == "receipt" and data.get("id"):
+            data["categories"] = self._get_receipt_categories(data["id"])
 
         if data.get("method_pay"):
             data["method_pay_name"] = self._get_named_salary_row(
@@ -969,6 +1000,92 @@ class SalaryService:
             else:
                 self._cache[cache_key] = None
         return self._cache[cache_key]
+
+    def _get_receipt_list(self, receipt_list_id: int) -> dict[str, Any] | None:
+        cache_key = ("receipt_list", receipt_list_id)
+        if cache_key not in self._cache:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT id, name, user_id
+                    FROM receipt_list
+                    WHERE id = :receipt_list_id
+                    LIMIT 1
+                    """
+                ),
+                {"receipt_list_id": receipt_list_id},
+            ).mappings().first()
+            if row:
+                data = dict(row)
+                data["user"] = self._get_auth_user(data["user_id"])
+                self._cache[cache_key] = data
+            else:
+                self._cache[cache_key] = None
+        return self._cache[cache_key]
+
+    def _get_receipt(self, receipt_id: int) -> dict[str, Any] | None:
+        cache_key = ("receipt", receipt_id)
+        if cache_key not in self._cache:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        store_name,
+                        retailPlaceAddress,
+                        fiscalDriveNumber,
+                        fiscalDocumentNumber,
+                        fiscalSign,
+                        sum,
+                        user_id,
+                        receipt_list_id,
+                        status,
+                        created_at
+                    FROM receipt
+                    WHERE id = :receipt_id
+                    LIMIT 1
+                    """
+                ),
+                {"receipt_id": receipt_id},
+            ).mappings().first()
+            if row:
+                data = dict(row)
+                data["user"] = self._get_auth_user(data["user_id"])
+                data["receipt_list"] = self._get_receipt_list(data["receipt_list_id"])
+                data["categories"] = self._get_receipt_categories(data["id"])
+                self._cache[cache_key] = data
+            else:
+                self._cache[cache_key] = None
+        return self._cache[cache_key]
+
+    def _get_receipt_items(self, receipt_id: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT id, receipt_id, name, quantity, price, nds, nds_sum, sum
+                FROM receipt_item
+                WHERE receipt_id = :receipt_id
+                ORDER BY id
+                """
+            ),
+            {"receipt_id": receipt_id},
+        ).mappings().all()
+        return [dict(row) for row in rows]
+
+    def _get_receipt_categories(self, receipt_id: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT rc.id, rc.receipt_id, rc.category_id, c.name AS category_name
+                FROM receipt_category rc
+                LEFT JOIN category c ON c.id = rc.category_id
+                WHERE rc.receipt_id = :receipt_id
+                ORDER BY rc.id
+                """
+            ),
+            {"receipt_id": receipt_id},
+        ).mappings().all()
+        return [dict(row) for row in rows]
 
     def _get_object_name(self, object_id: str) -> str | None:
         reference_name = self._get_reference_name("objects", object_id)

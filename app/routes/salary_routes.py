@@ -21,6 +21,11 @@ from app.models.salary import (
     OperationDB,
     OperationSalaryDB,
     PersonDB,
+    ReceiptCategoryDB,
+    ReceiptDB,
+    ReceiptItemDB,
+    ReceiptListDB,
+    ReceiptListViewDB,
     TypeDB,
 )
 from app.repositories.session_repository import AuthenticatedSession
@@ -46,6 +51,16 @@ from app.schemas import (
     OperationUpdate,
     PersonCreate,
     PersonUpdate,
+    ReceiptCategoryCreate,
+    ReceiptCategoryUpdate,
+    ReceiptCreate,
+    ReceiptItemCreate,
+    ReceiptItemUpdate,
+    ReceiptListCreate,
+    ReceiptListUpdate,
+    ReceiptListViewCreate,
+    ReceiptListViewUpdate,
+    ReceiptUpdate,
 )
 from app.services.salary_service import SalaryService
 from app.services.mistral_service import MistralOperationDraftService
@@ -74,10 +89,19 @@ def register_crud(
         reference_db: ReferenceDbSession,
         limit: int = 100,
         offset: int = 0,
+        user_id: str | None = None,
+        receipt_list_id: int | None = None,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
         _ = current_session
-        return get_service(db, auth_db, reference_db).list(limit=limit, offset=offset)
+        return get_service(db, auth_db, reference_db).list(
+            limit=limit,
+            offset=offset,
+            filters={
+                "user_id": user_id,
+                "receipt_list_id": receipt_list_id,
+            },
+        )
 
     def get_item(
         item_id: str,
@@ -449,6 +473,46 @@ crud_resources: list[dict[str, Any]] = [
         "primary_key": "id",
         "create_schema": PersonCreate,
         "update_schema": PersonUpdate,
+    },
+    {
+        "prefix": "/receipt-lists",
+        "tags": ["Списки чеков"],
+        "model": ReceiptListDB,
+        "primary_key": "id",
+        "create_schema": ReceiptListCreate,
+        "update_schema": ReceiptListUpdate,
+    },
+    {
+        "prefix": "/receipts",
+        "tags": ["Чеки"],
+        "model": ReceiptDB,
+        "primary_key": "id",
+        "create_schema": ReceiptCreate,
+        "update_schema": ReceiptUpdate,
+    },
+    {
+        "prefix": "/receipt-categories",
+        "tags": ["Категории чеков"],
+        "model": ReceiptCategoryDB,
+        "primary_key": "id",
+        "create_schema": ReceiptCategoryCreate,
+        "update_schema": ReceiptCategoryUpdate,
+    },
+    {
+        "prefix": "/receipt-items",
+        "tags": ["Позиции чеков"],
+        "model": ReceiptItemDB,
+        "primary_key": "id",
+        "create_schema": ReceiptItemCreate,
+        "update_schema": ReceiptItemUpdate,
+    },
+    {
+        "prefix": "/receipt-list-views",
+        "tags": ["Доступ к спискам чеков"],
+        "model": ReceiptListViewDB,
+        "primary_key": "id",
+        "create_schema": ReceiptListViewCreate,
+        "update_schema": ReceiptListViewUpdate,
     },
     {
         "prefix": "/types",
