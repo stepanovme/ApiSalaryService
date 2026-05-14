@@ -189,7 +189,7 @@ class OperationSalaryCreate(SalarySchema):
 
 
 class OperationSalaryUpdate(SalarySchema):
-    date: Optional[date] = None
+    date: Optional[datetime] = None
     nounth_period: Optional[MonthPeriod] = None
     year: Optional[int] = None
     employee_id: Optional[str] = None
@@ -253,7 +253,7 @@ class ReceiptCreate(SalarySchema):
     fiscalDriveNumber: Optional[str] = None
     fiscalDocumentNumber: Optional[str] = None
     fiscalSign: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[datetime] = None
     inn: Optional[str] = None
     sum: Optional[float] = None
     user_id: Optional[str] = None
@@ -268,7 +268,7 @@ class ReceiptUpdate(SalarySchema):
     fiscalDriveNumber: Optional[str] = None
     fiscalDocumentNumber: Optional[str] = None
     fiscalSign: Optional[str] = None
-    date: Optional[date] = None
+    date: Optional[datetime] = None
     inn: Optional[str] = None
     sum: Optional[float] = None
     user_id: Optional[str] = None

@@ -208,7 +208,7 @@ class ReceiptDB(Base):
     fiscalDriveNumber = Column(String(300))
     fiscalDocumentNumber = Column(String(300))
     fiscalSign = Column(String(300))
-    date = Column(Date)
+    date = Column(DateTime)
     inn = Column(String(100))
     sum = Column(Float)
     user_id = Column(CHAR(36), nullable=False)
