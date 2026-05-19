@@ -90,6 +90,7 @@ def register_crud(
         limit: int = 100,
         offset: int = 0,
         user_id: str | None = None,
+        employee_id: str | None = None,
         receipt_list_id: int | None = None,
         current_session: AuthenticatedSession = Depends(get_session),
     ):
@@ -99,6 +100,7 @@ def register_crud(
             offset=offset,
             filters={
                 "user_id": user_id,
+                "employee_id": employee_id,
                 "receipt_list_id": receipt_list_id,
             },
         )
