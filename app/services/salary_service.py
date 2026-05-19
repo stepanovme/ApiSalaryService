@@ -485,7 +485,16 @@ class SalaryService:
             )
 
         if data.get("object_id"):
-            data["object_name"] = self._get_object_name(data["object_id"])
+            salary_object = self._get_salary_object(data["object_id"])
+            if salary_object:
+                data["object_name"] = salary_object["name"]
+                data["object"] = salary_object
+                if salary_object.get("object_id"):
+                    data["object_project_name"] = self._get_reference_name(
+                        "objects", salary_object["object_id"]
+                    )
+            else:
+                data["object_name"] = self._get_object_name(data["object_id"])
 
         if data.get("from_person"):
             data["from_person_data"] = self._get_person(data["from_person"])
@@ -1092,6 +1101,23 @@ class SalaryService:
         if reference_name:
             return reference_name
         return self._get_named_salary_row("objects", "id", object_id)
+
+    def _get_salary_object(self, object_id: str) -> dict[str, Any] | None:
+        cache_key = ("salary_object", object_id)
+        if cache_key not in self._cache:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT id, name, object_id
+                    FROM objects
+                    WHERE id = :object_id
+                    LIMIT 1
+                    """
+                ),
+                {"object_id": object_id},
+            ).mappings().first()
+            self._cache[cache_key] = dict(row) if row else None
+        return self._cache[cache_key]
 
     def _get_named_salary_row(self, table_name: str, key_name: str, row_id: Any) -> str | None:
         cache_key = (f"salary_{table_name}_{key_name}", row_id)
