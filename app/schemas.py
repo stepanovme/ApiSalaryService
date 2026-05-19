@@ -151,6 +151,7 @@ class OperationCreate(SalarySchema):
     type_operation: Optional[OperationKind] = None
     method_pay: Optional[int] = None
     category_id: Optional[str] = None
+    phone: Optional[str] = None
     coment: Optional[str] = None
     object_id: Optional[str] = None
     financial_source_id: Optional[str] = None
@@ -168,6 +169,7 @@ class OperationUpdate(SalarySchema):
     type_operation: Optional[OperationKind] = None
     method_pay: Optional[int] = None
     category_id: Optional[str] = None
+    phone: Optional[str] = None
     coment: Optional[str] = None
     object_id: Optional[str] = None
     financial_source_id: Optional[str] = None

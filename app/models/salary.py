@@ -106,6 +106,7 @@ class OperationDB(Base):
     type_operation = Column(Enum("entrance", "expenditure", native_enum=False))
     method_pay = Column(Integer)
     category_id = Column(CHAR(36))
+    phone = Column(String(18))
     coment = Column(Text)
     object_id = Column(CHAR(36))
     financial_source_id = Column(CHAR(36))
