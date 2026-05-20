@@ -64,6 +64,7 @@ class FinancialSourceDB(AuditMixin, Base):
 
     id = Column(CHAR(36), primary_key=True)
     name = Column(String(100), nullable=False)
+    employee_id = Column(CHAR(36))
 
 
 class FileDB(Base):

@@ -54,6 +54,20 @@ class NamedUpdate(SalarySchema):
     edit_by: Optional[str] = None
 
 
+class FinancialSourceCreate(SalarySchema):
+    id: Optional[str] = None
+    name: str
+    employee_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+
+
+class FinancialSourceUpdate(SalarySchema):
+    name: Optional[str] = None
+    employee_id: Optional[str] = None
+    edit_by: Optional[str] = None
+
+
 class DictionaryCreate(SalarySchema):
     id: Optional[int] = None
     name: str
