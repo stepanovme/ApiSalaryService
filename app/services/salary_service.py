@@ -352,7 +352,7 @@ class SalaryService:
         buh_total = self._sum_buh_salary(employee_id, mounth_period, year)
         vacation_buh = self._sum_buh_salary(employee_id, mounth_period, year, 4)
         vacation_ev = vacation_total - vacation_buh
-        paid_total = self._sum_operations_salary(employee_id, mounth_period, year)
+        paid_total = buh_total + self._sum_operations_salary(employee_id, mounth_period, year, exclude_type_ids=[1, 2, 3, 4])
         overpayment = (
             self._get_previous_overpayment(employee_id, mounth_period, year)
             if apply_overpayment
@@ -365,7 +365,7 @@ class SalaryService:
         if user_id is None:
             salary_accrued = salary_total
 
-        remaining = salary_accrued - paid_total_with_overpayment
+        remaining = salary_accrued + vacation_ev - paid_total_with_overpayment
         if user_id is None and salary_total == 0 and buh_total > 0 and remaining < 0:
             remaining = 0
 
@@ -846,15 +846,23 @@ class SalaryService:
         mounth_period: str,
         year: int,
         type_id: int | None = None,
+        exclude_type_ids: list[int] | None = None,
     ) -> float:
-        type_filter = "AND type_id = :type_id" if type_id is not None else ""
+        conditions = []
         params = {
             "employee_id": employee_id,
             "mounth_period": mounth_period,
             "year": year,
         }
         if type_id is not None:
+            conditions.append("type_id = :type_id")
             params["type_id"] = type_id
+        if exclude_type_ids:
+            placeholders = [f":exclude_{i}" for i in range(len(exclude_type_ids))]
+            conditions.append(f"type_id NOT IN ({', '.join(placeholders)})")
+            for i, tid in enumerate(exclude_type_ids):
+                params[f"exclude_{i}"] = tid
+        type_filter = f"AND {' AND '.join(conditions)}" if conditions else ""
         row = self.db.execute(
             text(
                 f"""
