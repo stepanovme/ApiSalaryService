@@ -1,15 +1,20 @@
+import asyncio
 import re
+import uuid
+from datetime import datetime
 from typing import Any
 from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
-from app.database import AuthDbSession, DbSession, ReferenceDbSession, TimetrackDbSession
+from app.database import AuthDbSession, DbSession, ReferenceDbSession, SalarySessionLocal, TimetrackDbSession
 from app.middleware.auth_middleware import get_session
 from app.models.salary import (
+    AllowedDeviceDB,
+    AuthSessionDB,
     BuhSalaryDB,
     CategoryDB,
     EmployeeDB,
@@ -30,6 +35,10 @@ from app.models.salary import (
 )
 from app.repositories.session_repository import AuthenticatedSession
 from app.schemas import (
+    AllowedDeviceCreate,
+    AllowedDeviceUpdate,
+    AuthSessionCreate,
+    AuthSessionUpdate,
     BuhSalaryCreate,
     BuhSalaryUpdate,
     DictionaryCreate,
@@ -380,6 +389,71 @@ def delete_file(
     return data
 
 
+@salary_router.websocket("/auth-ws")
+async def auth_websocket(websocket: WebSocket, device_id: str):
+    await websocket.accept()
+
+    db = SalarySessionLocal()
+    try:
+        token_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+        session = AuthSessionDB(
+            token_id=token_id,
+            status="pending",
+            device_id=device_id,
+            created_at=now,
+        )
+        db.add(session)
+        db.commit()
+
+        last_status = "pending"
+
+        await websocket.send_json({
+            "type": "token_created",
+            "token_id": token_id,
+            "device_id": device_id,
+            "status": last_status,
+        })
+
+        while True:
+            await asyncio.sleep(60)
+
+            row = db.query(AuthSessionDB).filter(
+                AuthSessionDB.token_id == token_id
+            ).first()
+
+            if row and row.status != last_status:
+                await websocket.send_json({
+                    "type": "status_changed",
+                    "token_id": token_id,
+                    "status": row.status,
+                    "previous_status": last_status,
+                })
+                last_status = row.status
+
+            token_id = str(uuid.uuid4())
+            session = AuthSessionDB(
+                token_id=token_id,
+                status="pending",
+                device_id=device_id,
+                created_at=datetime.utcnow(),
+            )
+            db.add(session)
+            db.commit()
+
+            await websocket.send_json({
+                "type": "token_created",
+                "token_id": token_id,
+                "device_id": device_id,
+                "status": "pending",
+            })
+            last_status = "pending"
+    except WebSocketDisconnect:
+        pass
+    finally:
+        db.close()
+
+
 def _ascii_download_name(file_name: str) -> str:
     suffix = Path(file_name).suffix
     stem = Path(file_name).stem or "file"
@@ -525,6 +599,22 @@ crud_resources: list[dict[str, Any]] = [
         "primary_key": "id",
         "create_schema": DictionaryCreate,
         "update_schema": DictionaryUpdate,
+    },
+    {
+        "prefix": "/auth-sessions",
+        "tags": ["Сессии авторизации"],
+        "model": AuthSessionDB,
+        "primary_key": "token_id",
+        "create_schema": AuthSessionCreate,
+        "update_schema": AuthSessionUpdate,
+    },
+    {
+        "prefix": "/allowed-devices",
+        "tags": ["Допущенные устройства"],
+        "model": AllowedDeviceDB,
+        "primary_key": "device_id",
+        "create_schema": AllowedDeviceCreate,
+        "update_schema": AllowedDeviceUpdate,
     },
 ]
 

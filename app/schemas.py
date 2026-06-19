@@ -333,3 +333,31 @@ class ReceiptListViewCreate(SalarySchema):
 class ReceiptListViewUpdate(SalarySchema):
     receipt_list_id: Optional[int] = None
     user_id: Optional[str] = None
+
+
+class AuthSessionStatus(StrEnum):
+    pending = "pending"
+    rejected = "rejected"
+    approved = "approved"
+
+
+class AuthSessionCreate(SalarySchema):
+    token_id: Optional[str] = None
+    device_id: str
+    status: Optional[AuthSessionStatus] = None
+    created_at: Optional[datetime] = None
+
+
+class AuthSessionUpdate(SalarySchema):
+    status: Optional[AuthSessionStatus] = None
+
+
+class AllowedDeviceCreate(SalarySchema):
+    device_id: Optional[str] = None
+    owner_name: str
+    is_active: Optional[bool] = None
+
+
+class AllowedDeviceUpdate(SalarySchema):
+    owner_name: Optional[str] = None
+    is_active: Optional[bool] = None

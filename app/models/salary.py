@@ -1,4 +1,4 @@
-from sqlalchemy import CHAR, Column, Date, DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import CHAR, Boolean, Column, Date, DateTime, Enum, Float, Integer, String, Text
 
 from app.database import Base
 
@@ -253,3 +253,24 @@ class TypeDB(AuditMixin, Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
+
+
+class AuthSessionDB(Base):
+    __tablename__ = "auth_session"
+
+    token_id = Column(CHAR(36), primary_key=True)
+    status = Column(
+        Enum("pending", "rejected", "approved", native_enum=False),
+        nullable=False,
+        default="pending",
+    )
+    device_id = Column(CHAR(36), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class AllowedDeviceDB(Base):
+    __tablename__ = "allowed_devices"
+
+    device_id = Column(CHAR(36), primary_key=True)
+    owner_name = Column(String(100), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=False)

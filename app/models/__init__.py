@@ -1,4 +1,6 @@
 from app.models.salary import (
+    AllowedDeviceDB,
+    AuthSessionDB,
     BuhSalaryDB,
     CategoryDB,
     EmployeeDB,
@@ -16,8 +18,10 @@ from app.models.salary import (
 from app.models.session import SessionDB
 
 __all__ = [
-    "CategoryDB",
+    "AllowedDeviceDB",
+    "AuthSessionDB",
     "BuhSalaryDB",
+    "CategoryDB",
     "EmployeeDB",
     "EmployeeSalaryDB",
     "EmploymentHistoryDB",
