@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from app.database import AuthDbSession, DbSession, ReferenceDbSession, SalarySessionLocal, TimetrackDbSession
@@ -426,12 +426,148 @@ async def auth_websocket(websocket: WebSocket):
                         "token_id": token_id,
                         "status": row.status,
                     })
-                db.delete(row)
-                db.commit()
+                else:
+                    db.delete(row)
+                    db.commit()
     except WebSocketDisconnect:
         pass
     finally:
         db.close()
+
+
+async def verify_api_key(api_key: str = Header(alias="api-key")):
+    if api_key != "bN_vkSL4O1bN_vkSL4O1":
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+
+def _auth_service(db: DbSession) -> SalaryService:
+    return SalaryService(db, AuthSessionDB, "token_id", db, db)
+
+
+def _device_service(db: DbSession) -> SalaryService:
+    return SalaryService(db, AllowedDeviceDB, "device_id", db, db)
+
+
+@salary_router.post("/auth-sessions", tags=["Сессии авторизации"], summary="Создать сессию")
+def create_auth_session(
+    payload: AuthSessionCreate,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    return _auth_service(db).create(payload, None)
+
+
+@salary_router.get(
+    "/auth-sessions/{token_id}",
+    tags=["Сессии авторизации"],
+    summary="Получить сессию",
+)
+def get_auth_session(
+    token_id: str,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    data = _auth_service(db).get(token_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
+
+
+@salary_router.patch(
+    "/auth-sessions/{token_id}",
+    tags=["Сессии авторизации"],
+    summary="Изменить сессию",
+)
+def update_auth_session(
+    token_id: str,
+    payload: AuthSessionUpdate,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    try:
+        data = _auth_service(db).update(token_id, payload, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
+
+
+@salary_router.delete(
+    "/auth-sessions/{token_id}",
+    tags=["Сессии авторизации"],
+    summary="Удалить сессию",
+)
+def delete_auth_session(
+    token_id: str,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    data = _auth_service(db).delete(token_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
+
+
+@salary_router.post("/allowed-devices", tags=["Допущенные устройства"], summary="Создать устройство")
+def create_allowed_device(
+    payload: AllowedDeviceCreate,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    return _device_service(db).create(payload, None)
+
+
+@salary_router.get(
+    "/allowed-devices/{device_id}",
+    tags=["Допущенные устройства"],
+    summary="Получить устройство",
+)
+def get_allowed_device(
+    device_id: str,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    data = _device_service(db).get(device_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
+
+
+@salary_router.patch(
+    "/allowed-devices/{device_id}",
+    tags=["Допущенные устройства"],
+    summary="Изменить устройство",
+)
+def update_allowed_device(
+    device_id: str,
+    payload: AllowedDeviceUpdate,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    try:
+        data = _device_service(db).update(device_id, payload, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
+
+
+@salary_router.delete(
+    "/allowed-devices/{device_id}",
+    tags=["Допущенные устройства"],
+    summary="Удалить устройство",
+)
+def delete_allowed_device(
+    device_id: str,
+    db: DbSession,
+    _: None = Depends(verify_api_key),
+):
+    data = _device_service(db).delete(device_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Запись не найдена")
+    return data
 
 
 def _ascii_download_name(file_name: str) -> str:
@@ -579,22 +715,6 @@ crud_resources: list[dict[str, Any]] = [
         "primary_key": "id",
         "create_schema": DictionaryCreate,
         "update_schema": DictionaryUpdate,
-    },
-    {
-        "prefix": "/auth-sessions",
-        "tags": ["Сессии авторизации"],
-        "model": AuthSessionDB,
-        "primary_key": "token_id",
-        "create_schema": AuthSessionCreate,
-        "update_schema": AuthSessionUpdate,
-    },
-    {
-        "prefix": "/allowed-devices",
-        "tags": ["Допущенные устройства"],
-        "model": AllowedDeviceDB,
-        "primary_key": "device_id",
-        "create_schema": AllowedDeviceCreate,
-        "update_schema": AllowedDeviceUpdate,
     },
 ]
 
