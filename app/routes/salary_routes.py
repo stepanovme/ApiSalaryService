@@ -420,6 +420,7 @@ async def auth_websocket(websocket: WebSocket):
             while True:
                 await asyncio.sleep(1)
 
+                db.commit()
                 result = db.execute(
                     text("SELECT status FROM auth_session WHERE token_id = :token_id"),
                     {"token_id": token_id},
