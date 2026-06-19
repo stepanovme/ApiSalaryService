@@ -390,53 +390,20 @@ def delete_file(
 
 
 @salary_router.websocket("/auth-ws")
-async def auth_websocket(websocket: WebSocket, device_id: str):
+async def auth_websocket(websocket: WebSocket):
     await websocket.accept()
 
     db = SalarySessionLocal()
+    session_device_id = str(uuid.uuid4())
     try:
-        token_id = str(uuid.uuid4())
-        now = datetime.utcnow()
-        session = AuthSessionDB(
-            token_id=token_id,
-            status="pending",
-            device_id=device_id,
-            created_at=now,
-        )
-        db.add(session)
-        db.commit()
-
-        last_status = "pending"
-
-        await websocket.send_json({
-            "type": "token_created",
-            "token_id": token_id,
-            "device_id": device_id,
-            "status": last_status,
-        })
-
         while True:
-            await asyncio.sleep(60)
-
-            row = db.query(AuthSessionDB).filter(
-                AuthSessionDB.token_id == token_id
-            ).first()
-
-            if row and row.status != last_status:
-                await websocket.send_json({
-                    "type": "status_changed",
-                    "token_id": token_id,
-                    "status": row.status,
-                    "previous_status": last_status,
-                })
-                last_status = row.status
-
             token_id = str(uuid.uuid4())
+            now = datetime.utcnow()
             session = AuthSessionDB(
                 token_id=token_id,
                 status="pending",
-                device_id=device_id,
-                created_at=datetime.utcnow(),
+                device_id=session_device_id,
+                created_at=now,
             )
             db.add(session)
             db.commit()
@@ -444,10 +411,23 @@ async def auth_websocket(websocket: WebSocket, device_id: str):
             await websocket.send_json({
                 "type": "token_created",
                 "token_id": token_id,
-                "device_id": device_id,
-                "status": "pending",
             })
-            last_status = "pending"
+
+            await asyncio.sleep(60)
+
+            row = db.query(AuthSessionDB).filter(
+                AuthSessionDB.token_id == token_id
+            ).first()
+
+            if row:
+                if row.status != "pending":
+                    await websocket.send_json({
+                        "type": "status_changed",
+                        "token_id": token_id,
+                        "status": row.status,
+                    })
+                db.delete(row)
+                db.commit()
     except WebSocketDisconnect:
         pass
     finally:
