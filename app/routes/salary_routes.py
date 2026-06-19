@@ -419,6 +419,7 @@ async def auth_websocket(websocket: WebSocket):
             while True:
                 await asyncio.sleep(1)
 
+                db.expire_all()
                 row = db.query(AuthSessionDB).filter(
                     AuthSessionDB.token_id == token_id
                 ).first()
