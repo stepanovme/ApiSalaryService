@@ -9,6 +9,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from sqlalchemy import text
 
 from app.database import AuthDbSession, DbSession, ReferenceDbSession, SalarySessionLocal, TimetrackDbSession
 from app.middleware.auth_middleware import get_session
@@ -419,24 +420,30 @@ async def auth_websocket(websocket: WebSocket):
             while True:
                 await asyncio.sleep(1)
 
-                db.expire_all()
-                row = db.query(AuthSessionDB).filter(
-                    AuthSessionDB.token_id == token_id
+                result = db.execute(
+                    text("SELECT status FROM auth_session WHERE token_id = :token_id"),
+                    {"token_id": token_id},
                 ).first()
+                current_status = result[0] if result else None
 
-                if row and row.status != last_status:
+                if current_status is not None and current_status != last_status:
                     await websocket.send_json({
                         "type": "status_changed",
                         "token_id": token_id,
-                        "status": row.status,
+                        "status": current_status,
                     })
-                    last_status = row.status
+                    last_status = current_status
 
                 elapsed = (datetime.utcnow() - token_created_at).total_seconds()
                 if elapsed >= 60:
-                    if row and row.status == "pending":
-                        db.delete(row)
-                        db.commit()
+                    db.execute(
+                        text(
+                            "DELETE FROM auth_session "
+                            "WHERE token_id = :token_id AND status = 'pending'"
+                        ),
+                        {"token_id": token_id},
+                    )
+                    db.commit()
                     break
     except WebSocketDisconnect:
         pass
