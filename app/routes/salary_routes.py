@@ -413,22 +413,30 @@ async def auth_websocket(websocket: WebSocket):
                 "token_id": token_id,
             })
 
-            await asyncio.sleep(60)
+            last_status = "pending"
+            token_created_at = datetime.utcnow()
 
-            row = db.query(AuthSessionDB).filter(
-                AuthSessionDB.token_id == token_id
-            ).first()
+            while True:
+                await asyncio.sleep(1)
 
-            if row:
-                if row.status != "pending":
+                row = db.query(AuthSessionDB).filter(
+                    AuthSessionDB.token_id == token_id
+                ).first()
+
+                if row and row.status != last_status:
                     await websocket.send_json({
                         "type": "status_changed",
                         "token_id": token_id,
                         "status": row.status,
                     })
-                else:
-                    db.delete(row)
-                    db.commit()
+                    last_status = row.status
+
+                elapsed = (datetime.utcnow() - token_created_at).total_seconds()
+                if elapsed >= 60:
+                    if row and row.status == "pending":
+                        db.delete(row)
+                        db.commit()
+                    break
     except WebSocketDisconnect:
         pass
     finally:
