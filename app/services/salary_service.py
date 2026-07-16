@@ -352,7 +352,7 @@ class SalaryService:
         buh_total = self._sum_buh_salary(employee_id, mounth_period, year)
         vacation_buh = self._sum_buh_salary(employee_id, mounth_period, year, 4)
         vacation_ev = vacation_total - vacation_buh
-        paid_total = buh_total + self._sum_operations_salary(employee_id, mounth_period, year, exclude_type_ids=[1, 2, 3, 4])
+        paid_total = buh_total + self._sum_operations_salary(employee_id, mounth_period, year, exclude_type_ids=[1, 2, 3, 4, 7])
         overpayment = (
             self._get_previous_overpayment(employee_id, mounth_period, year)
             if apply_overpayment
@@ -364,6 +364,8 @@ class SalaryService:
         paid_total_with_overpayment = paid_total + overpayment_value
         if user_id is None:
             salary_accrued = salary_total
+
+        salary_accrued += bonus
 
         remaining = salary_accrued + vacation_ev - paid_total_with_overpayment
         if user_id is None and salary_total == 0 and buh_total > 0 and remaining < 0:
