@@ -70,10 +70,27 @@ class SalaryService:
             return None
 
         data = payload.model_dump(exclude_unset=True)
+
+        if self.model.__tablename__ == "extract_item":
+            old_employee_id = row.employee_id
+            old_consider = row.consider
+            old_result = row.result
+        else:
+            old_employee_id = old_consider = old_result = None
+
         self._apply_employee_user_data(data)
         self._apply_update_defaults(data, actor_id)
         for field, value in data.items():
             setattr(row, field, value)
+
+        if self.model.__tablename__ == "extract_item":
+            self._sync_extract_item_ops(
+                item=row,
+                old_employee_id=old_employee_id,
+                old_consider=old_consider,
+                old_result=old_result,
+                actor_id=actor_id,
+            )
 
         self._commit("Некорректные данные для изменения записи")
         self.db.refresh(row)
@@ -1108,6 +1125,125 @@ class SalaryService:
             {"extract_id": extract_id},
         ).mappings().all()
         return [dict(row) for row in rows]
+
+    def _sync_extract_item_ops(
+        self,
+        *,
+        item: Any,
+        old_employee_id: str | None,
+        old_consider: bool,
+        old_result: str | None,
+        actor_id: str | None,
+    ) -> None:
+        new_employee_id = item.employee_id
+        new_consider = item.consider
+        new_result = item.result
+
+        should_have = (
+            new_employee_id is not None
+            and new_consider
+            and new_result == "Зачислено"
+        )
+
+        old_should_have = (
+            old_employee_id is not None
+            and old_consider
+            and old_result == "Зачислено"
+        )
+
+        extract_row = self.db.execute(
+            text("SELECT type, date, period FROM extracts WHERE id = :id LIMIT 1"),
+            {"id": item.extract_id},
+        ).mappings().first()
+        if not extract_row:
+            return
+        if extract_row["type"] not in ("salary", "report", "vacation"):
+            return
+
+        if old_should_have and old_employee_id != new_employee_id:
+            self.db.execute(
+                text(
+                    "DELETE FROM operations_salary WHERE extract_id = :eid AND employee_id = :e"
+                ),
+                {"eid": item.extract_id, "e": old_employee_id},
+            )
+
+        if should_have:
+            existing = self.db.execute(
+                text(
+                    "SELECT id FROM operations_salary WHERE extract_id = :eid AND employee_id = :e LIMIT 1"
+                ),
+                {"eid": item.extract_id, "e": new_employee_id},
+            ).first()
+
+            extract_type = extract_row["type"]
+            extract_date = extract_row["date"]
+            period = extract_row["period"]
+            now = datetime.utcnow()
+
+            if extract_type == "salary":
+                day = extract_date.day if extract_date else 1
+                type_id = 1 if 20 <= day <= 30 else 2
+            elif extract_type == "report":
+                type_id = 6
+            else:
+                type_id = 4
+
+            if existing:
+                self.db.execute(
+                    text(
+                        """
+                        UPDATE operations_salary
+                        SET value = :value, date = :date, nounth_period = :period,
+                            year = :year, type_id = :type_id
+                        WHERE id = :id
+                        """
+                    ),
+                    {
+                        "id": existing[0],
+                        "value": item.sum,
+                        "date": extract_date,
+                        "period": period,
+                        "year": extract_date.year if extract_date else datetime.utcnow().year,
+                        "type_id": type_id,
+                    },
+                )
+            else:
+                op_id = str(uuid.uuid4())
+                self.db.execute(
+                    text(
+                        """
+                        INSERT INTO operations_salary (
+                            id, date, nounth_period, year, employee_id,
+                            created_by, value, type_id, method_id, extract_id, created_at
+                        )
+                        VALUES (
+                            :id, :date, :period, :year, :employee_id,
+                            :created_by, :value, :type_id, :method_id, :extract_id, :created_at
+                        )
+                        """
+                    ),
+                    {
+                        "id": op_id,
+                        "date": extract_date,
+                        "period": period,
+                        "year": extract_date.year if extract_date else datetime.utcnow().year,
+                        "employee_id": new_employee_id,
+                        "created_by": actor_id,
+                        "value": item.sum,
+                        "type_id": type_id,
+                        "method_id": 3,
+                        "extract_id": item.extract_id,
+                        "created_at": now,
+                    },
+                )
+        elif old_should_have:
+            self.db.execute(
+                text(
+                    "DELETE FROM operations_salary WHERE extract_id = :eid AND employee_id = :e"
+                ),
+                {"eid": item.extract_id, "e": old_employee_id},
+            )
 
     def _get_receipt_categories(self, receipt_id: int) -> list[dict[str, Any]]:
         rows = self.db.execute(

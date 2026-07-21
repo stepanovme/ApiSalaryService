@@ -200,6 +200,7 @@ class OperationSalaryCreate(SalarySchema):
     value: float
     type_id: int
     method_id: int
+    extract_id: Optional[int] = None
     created_at: Optional[datetime] = None
     created_by: Optional[str] = None
 
@@ -212,6 +213,7 @@ class OperationSalaryUpdate(SalarySchema):
     value: Optional[float] = None
     type_id: Optional[int] = None
     method_id: Optional[int] = None
+    extract_id: Optional[int] = None
     edit_by: Optional[str] = None
 
 
@@ -374,6 +376,8 @@ class ExtractCreate(SalarySchema):
     type: ExtractType
     date: Optional[date] = None
     counterparties_id: Optional[str] = None
+    num: Optional[int] = None
+    period: Optional[str] = None
     created_at: Optional[datetime] = None
     created_by: Optional[str] = None
 
@@ -382,6 +386,8 @@ class ExtractUpdate(SalarySchema):
     type: Optional[ExtractType] = None
     date: Optional[date] = None
     counterparties_id: Optional[str] = None
+    num: Optional[int] = None
+    period: Optional[str] = None
 
 
 class ExtractItemCreate(SalarySchema):

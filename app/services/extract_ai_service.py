@@ -24,6 +24,11 @@ TYPE_MAP = {
     "Выписка": "extract",
 }
 
+MONTH_TO_PERIOD = {
+    1: "jun", 2: "feb", 3: "mar", 4: "apr", 5: "may", 6: "june",
+    7: "jul", 8: "aug", 9: "sep", 10: "oct", 11: "nov", 12: "dec",
+}
+
 
 class ExtractAIService:
     def __init__(self, db: Session, reference_db: Session) -> None:
@@ -53,19 +58,22 @@ class ExtractAIService:
             except ValueError:
                 pass
 
+        period = MONTH_TO_PERIOD.get(registry_date.month) if registry_date else None
         now = datetime.now(timezone.utc)
 
         self.db.execute(
             text(
                 """
-                INSERT INTO extracts (type, date, counterparties_id, created_at, created_by)
-                VALUES (:type, :date, :counterparties_id, :created_at, :created_by)
+                INSERT INTO extracts (type, date, counterparties_id, num, period, created_at, created_by)
+                VALUES (:type, :date, :counterparties_id, :num, :period, :created_at, :created_by)
                 """
             ),
             {
                 "type": extract_type,
                 "date": registry_date,
                 "counterparties_id": counterparties_id,
+                "num": data.get("extract_num"),
+                "period": period,
                 "created_at": now,
                 "created_by": actor_id,
             },
@@ -75,6 +83,7 @@ class ExtractAIService:
 
         for recipient in data.get("recipients", []):
             employee_id = self._find_employee(recipient.get("fio", ""))
+            consider = employee_id is not None
             item_id = str(uuid.uuid4())
             self.db.execute(
                 text(
@@ -103,10 +112,111 @@ class ExtractAIService:
                     "sum": recipient.get("sum"),
                     "result": recipient.get("result"),
                     "comment_result": recipient.get("comment_result"),
-                    "consider": employee_id is not None,
+                    "consider": consider,
                 },
             )
 
+            if extract_type in ("salary", "vacation", "report"):
+                self._create_operations_salary(
+                    extract_type=extract_type,
+                    extract_id=extract_id,
+                    date=registry_date,
+                    period=period,
+                    employee_id=employee_id,
+                    value=recipient.get("sum"),
+                    result=recipient.get("result"),
+                    actor_id=actor_id,
+                    now=now,
+                )
+
+        self._save_file(
+            file_bytes=file_bytes,
+            file_name=file_name,
+            content_type=content_type,
+            extract_id=extract_id,
+            actor_id=actor_id,
+            now=now,
+        )
+        self.db.commit()
+
+        return {
+            "extract_id": extract_id,
+            "company_name": data.get("company_name"),
+            "ogrn": data.get("ogrn"),
+            "ogrnip": data.get("ogrnip"),
+            "registry_type": data.get("registry_type"),
+            "registry_date": data.get("registry_date"),
+            "extract_num": data.get("extract_num"),
+            "period": period,
+            "recipients_count": len(data.get("recipients", [])),
+        }
+
+    def _create_operations_salary(
+        self,
+        extract_type: str,
+        extract_id: int | None,
+        date: Any,
+        period: str | None,
+        employee_id: str | None,
+        value: Any,
+        result: str | None,
+        actor_id: str | None,
+        now: datetime,
+    ) -> None:
+        if not employee_id or not date or not period or not value:
+            return
+        if result != "Зачислено":
+            return
+
+        if extract_type == "salary":
+            day = date.day
+            type_id = 1 if 20 <= day <= 30 else 2
+        elif extract_type == "report":
+            type_id = 6
+        elif extract_type == "vacation":
+            type_id = 4
+        else:
+            return
+
+        op_id = str(uuid.uuid4())
+        self.db.execute(
+            text(
+                """
+                INSERT INTO operations_salary (
+                    id, date, nounth_period, year, employee_id,
+                    created_by, value, type_id, method_id, extract_id, created_at
+                )
+                VALUES (
+                    :id, :date, :nounth_period, :year, :employee_id,
+                    :created_by, :value, :type_id, :method_id, :extract_id, :created_at
+                )
+                """
+            ),
+            {
+                "id": op_id,
+                "date": date,
+                "nounth_period": period,
+                "year": date.year,
+                "employee_id": employee_id,
+                "created_by": actor_id,
+                "value": value,
+                "type_id": type_id,
+                "method_id": 3,
+                "extract_id": extract_id,
+                "created_at": now,
+            },
+        )
+
+    def _save_file(
+        self,
+        *,
+        file_bytes: bytes,
+        file_name: str | None,
+        content_type: str | None,
+        extract_id: int | None,
+        actor_id: str | None,
+        now: datetime,
+    ) -> None:
         file_id = str(uuid.uuid4())
         safe_name = re.sub(r"[^A-Za-zА-Яа-я0-9._-]+", "_", (file_name or "file").strip())[:180]
         storage_name = f"{file_id}_{safe_name}"
@@ -142,17 +252,6 @@ class ExtractAIService:
                 "uploaded_at": now,
             },
         )
-        self.db.commit()
-
-        return {
-            "extract_id": extract_id,
-            "company_name": data.get("company_name"),
-            "ogrn": data.get("ogrn"),
-            "ogrnip": data.get("ogrnip"),
-            "registry_type": data.get("registry_type"),
-            "registry_date": data.get("registry_date"),
-            "recipients_count": len(data.get("recipients", [])),
-        }
 
     def _extract_file_text(
         self,
@@ -255,6 +354,7 @@ for sheet_name in wb.sheetnames:
   "company_name": "Название компании",
   "ogrn": "ОГРН или null",
   "ogrnip": "ОГРНИП или null",
+  "extract_num": "123 или null",
   "registry_date": "YYYY-MM-DD",
   "registry_type": "Зарплата|Отпуск|Выплата по отчёт|Выписка",
   "recipients": [

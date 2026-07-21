@@ -147,6 +147,7 @@ class OperationSalaryDB(Base):
     value = Column(Float, nullable=False)
     type_id = Column(Integer, nullable=False)
     method_id = Column(Integer, nullable=False)
+    extract_id = Column(Integer)
     created_at = Column(DateTime, nullable=False)
 
 
@@ -286,6 +287,8 @@ class ExtractDB(Base):
     )
     date = Column(Date)
     counterparties_id = Column(CHAR(36))
+    num = Column(Integer)
+    period = Column(String(4))
     created_at = Column(DateTime, nullable=False)
     created_by = Column(CHAR(36), nullable=False)
 
