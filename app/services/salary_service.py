@@ -226,6 +226,43 @@ class SalaryService:
                         "created_at": row["created_at"],
                     }
                 )
+            elif paid_value > 0:
+                ops_rows = self.db.execute(
+                    text(
+                        """
+                        SELECT type_id, SUM(value) AS paid
+                        FROM operations_salary
+                        WHERE employee_id = :employee_id
+                          AND nounth_period = :mounth_period
+                          AND year = :year
+                        GROUP BY type_id
+                        """
+                    ),
+                    {
+                        "employee_id": row["employee_id"],
+                        "mounth_period": mounth_period,
+                        "year": year,
+                    },
+                ).mappings().all()
+                for ops_row in ops_rows:
+                    ops_paid = float(ops_row["paid"])
+                    employee_item["accruals"].append(
+                        {
+                            "buh_salary_id": None,
+                            "type_id": ops_row["type_id"],
+                            "type_name": self._get_named_salary_row(
+                                "type", "id", ops_row["type_id"]
+                            ),
+                            "accrued_value": 0,
+                            "paid_value": ops_paid,
+                            "remaining_value": -ops_paid,
+                            "created_by": None,
+                            "created_by_user": None,
+                            "edit_by": None,
+                            "edit_by_user": None,
+                            "created_at": None,
+                        }
+                    )
             employee_item["total_accrued"] += accrued_value
             employee_item["total_paid"] += paid_value
             employee_item["total_remaining"] += remaining_value
