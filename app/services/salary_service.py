@@ -50,6 +50,8 @@ class SalaryService:
         data = self._serialize(row)
         if self.model.__tablename__ == "receipt":
             data["items"] = self._get_receipt_items(data["id"])
+        if self.model.__tablename__ == "extracts":
+            data["items"] = self._get_extract_items(data["id"])
         return data
 
     def create(self, payload: BaseModel, actor_id: str | None):
@@ -1088,6 +1090,22 @@ class SalaryService:
                 """
             ),
             {"receipt_id": receipt_id},
+        ).mappings().all()
+        return [dict(row) for row in rows]
+
+    def _get_extract_items(self, extract_id: int) -> list[dict[str, Any]]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT id, extract_id, num, fio, employee_id,
+                       account_num, bik, withheld, sum, result,
+                       comment_result, consider
+                FROM extract_item
+                WHERE extract_id = :extract_id
+                ORDER BY num
+                """
+            ),
+            {"extract_id": extract_id},
         ).mappings().all()
         return [dict(row) for row in rows]
 
