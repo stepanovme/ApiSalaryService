@@ -21,6 +21,10 @@ from app.models.salary import (
     EmployeeDB,
     EmployeeSalaryDB,
     EmploymentHistoryDB,
+    ExtractDB,
+    ExtractFilesDB,
+    ExtractItemDB,
+    FileDB,
     FinancialSourceDB,
     MethodDB,
     ObjectDB,
@@ -50,6 +54,12 @@ from app.schemas import (
     EmployeeUpdate,
     EmploymentHistoryCreate,
     EmploymentHistoryUpdate,
+    ExtractCreate,
+    ExtractFilesCreate,
+    ExtractFilesUpdate,
+    ExtractItemCreate,
+    ExtractItemUpdate,
+    ExtractUpdate,
     FinancialSourceCreate,
     FinancialSourceUpdate,
     MonthPeriod,
@@ -77,6 +87,7 @@ from app.schemas import (
 from app.services.salary_service import SalaryService
 from app.services.mistral_service import MistralOperationDraftService
 from app.services.file_service import FileService
+from app.services.extract_ai_service import ExtractAIService
 
 salary_router = APIRouter()
 
@@ -587,6 +598,246 @@ def delete_allowed_device(
     return data
 
 
+EXTRACTS_FILE_DIR = Path("/home/webserver/models/finance/extracts")
+
+
+def _safe_filename(file_name: str) -> str:
+    cleaned = Path(file_name).name.strip() or "file"
+    return re.sub(r"[^A-Za-zА-Яа-я0-9._-]+", "_", cleaned)[:180]
+
+
+@salary_router.post(
+    "/extract-files",
+    tags=["Файлы выписок"],
+    summary="Загрузить файл выписки",
+)
+async def upload_extract_file(
+    db: DbSession,
+    extract_id: int = Form(...),
+    file: UploadFile = File(...),
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    if not current_session.user_id:
+        raise HTTPException(status_code=400, detail="Не удалось определить uploaded_by")
+
+    EXTRACTS_FILE_DIR.mkdir(parents=True, exist_ok=True)
+    file_id = str(uuid.uuid4())
+    safe_name = _safe_filename(file.filename or "file")
+    ext = Path(file.filename).suffix if file.filename else None
+    storage_name = f"{file_id}_{safe_name}"
+    file_path = EXTRACTS_FILE_DIR / storage_name
+
+    with file_path.open("wb") as output:
+        while chunk := file.file.read(1024 * 1024):
+            output.write(chunk)
+
+    uploaded_at = datetime.utcnow()
+    db.execute(
+        text(
+            """
+            INSERT INTO extract_files (
+                id, extract_id, original_name, storage_name, extension,
+                mime_type, file_path, uploaded_by, uploaded_at
+            )
+            VALUES (
+                :id, :extract_id, :original_name, :storage_name, :extension,
+                :mime_type, :file_path, :uploaded_by, :uploaded_at
+            )
+            """
+        ),
+        {
+            "id": file_id,
+            "extract_id": extract_id,
+            "original_name": file.filename,
+            "storage_name": storage_name,
+            "extension": ext,
+            "mime_type": file.content_type,
+            "file_path": str(file_path),
+            "uploaded_by": current_session.user_id,
+            "uploaded_at": uploaded_at,
+        },
+    )
+    db.commit()
+
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :id"), {"id": file_id}
+    ).mappings().first()
+    return dict(row) if row else None
+
+
+@salary_router.get(
+    "/extract-files",
+    tags=["Файлы выписок"],
+    summary="Список файлов выписки",
+)
+def list_extract_files(
+    db: DbSession,
+    extract_id: int | None = None,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    if extract_id:
+        rows = db.execute(
+            text(
+                "SELECT * FROM extract_files WHERE extract_id = :extract_id ORDER BY uploaded_at DESC"
+            ),
+            {"extract_id": extract_id},
+        ).mappings().all()
+    else:
+        rows = db.execute(
+            text("SELECT * FROM extract_files ORDER BY uploaded_at DESC")
+        ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+@salary_router.get(
+    "/extract-files/{file_id}",
+    tags=["Файлы выписок"],
+    summary="Получить информацию о файле",
+)
+def get_extract_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return dict(row)
+
+
+@salary_router.get(
+    "/extract-files/{file_id}/download",
+    tags=["Файлы выписок"],
+    summary="Скачать файл",
+)
+def download_extract_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    file_path = Path(row["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
+    return FileResponse(
+        path=file_path,
+        media_type=row["mime_type"] or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{row["original_name"]}"'
+        },
+    )
+
+
+@salary_router.patch(
+    "/extract-files/{file_id}",
+    tags=["Файлы выписок"],
+    summary="Изменить метаданные файла",
+)
+def update_extract_file(
+    file_id: str,
+    payload: ExtractFilesUpdate,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        return dict(row)
+
+    sets = ", ".join(f"{k} = :{k}" for k in data)
+    data["file_id"] = file_id
+    db.execute(
+        text(f"UPDATE extract_files SET {sets} WHERE id = :file_id"),
+        data,
+    )
+    db.commit()
+
+    updated = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    return dict(updated) if updated else None
+
+
+@salary_router.delete(
+    "/extract-files/{file_id}",
+    tags=["Файлы выписок"],
+    summary="Удалить файл",
+)
+def delete_extract_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+
+    file_path = Path(row["file_path"])
+    if file_path.exists():
+        file_path.unlink()
+
+    db.execute(
+        text("DELETE FROM extract_files WHERE id = :file_id"),
+        {"file_id": file_id},
+    )
+    db.commit()
+    return dict(row)
+
+
+@salary_router.post(
+    "/extracts/process-file",
+    tags=["Выписки"],
+    summary="Распознать файл через ИИ и создать выписку",
+)
+async def process_extract_file(
+    db: DbSession,
+    reference_db: ReferenceDbSession,
+    file: UploadFile = File(...),
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    file_bytes = await file.read()
+    service = ExtractAIService(db, reference_db)
+    try:
+        return await service.process_file(
+            file_bytes=file_bytes,
+            file_name=file.filename,
+            content_type=file.content_type,
+            actor_id=current_session.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Mistral API error: {exc.response.status_code} {exc.response.text}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Mistral API error: {exc}") from exc
+
+
 def _ascii_download_name(file_name: str) -> str:
     suffix = Path(file_name).suffix
     stem = Path(file_name).stem or "file"
@@ -732,6 +983,22 @@ crud_resources: list[dict[str, Any]] = [
         "primary_key": "id",
         "create_schema": DictionaryCreate,
         "update_schema": DictionaryUpdate,
+    },
+    {
+        "prefix": "/extracts",
+        "tags": ["Выписки"],
+        "model": ExtractDB,
+        "primary_key": "id",
+        "create_schema": ExtractCreate,
+        "update_schema": ExtractUpdate,
+    },
+    {
+        "prefix": "/extract-items",
+        "tags": ["Позиции выписок"],
+        "model": ExtractItemDB,
+        "primary_key": "id",
+        "create_schema": ExtractItemCreate,
+        "update_schema": ExtractItemUpdate,
     },
 ]
 

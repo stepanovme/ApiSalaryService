@@ -1,4 +1,4 @@
-from sqlalchemy import CHAR, Boolean, Column, Date, DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import CHAR, Boolean, Column, Date, DateTime, Enum, Float, Integer, String, Text, ForeignKey
 
 from app.database import Base
 
@@ -274,3 +274,48 @@ class AllowedDeviceDB(Base):
     device_id = Column(CHAR(36), primary_key=True)
     owner_name = Column(String(100), nullable=False)
     is_active = Column(Boolean, nullable=False, default=False)
+
+
+class ExtractDB(Base):
+    __tablename__ = "extracts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type = Column(
+        Enum("salary", "report", "vacation", "extract", native_enum=False),
+        nullable=False,
+    )
+    date = Column(Date)
+    counterparties_id = Column(CHAR(36))
+    created_at = Column(DateTime, nullable=False)
+    created_by = Column(CHAR(36), nullable=False)
+
+
+class ExtractItemDB(Base):
+    __tablename__ = "extract_item"
+
+    id = Column(CHAR(36), primary_key=True)
+    extract_id = Column(Integer, nullable=False)
+    num = Column(Integer, nullable=False)
+    fio = Column(Text, nullable=False)
+    employee_id = Column(CHAR(36))
+    account_num = Column(String(100))
+    bik = Column(String(100))
+    withheld = Column(Float)
+    sum = Column(Float)
+    result = Column(Text)
+    comment_result = Column(Text)
+    consider = Column(Boolean, nullable=False, default=False)
+
+
+class ExtractFilesDB(Base):
+    __tablename__ = "extract_files"
+
+    id = Column(CHAR(36), primary_key=True)
+    extract_id = Column(Integer, nullable=False)
+    original_name = Column(Text, nullable=False)
+    storage_name = Column(Text, nullable=False)
+    extension = Column(String(100))
+    mime_type = Column(String(100))
+    file_path = Column(Text, nullable=False)
+    uploaded_by = Column(CHAR(36), nullable=False)
+    uploaded_at = Column(DateTime, nullable=False)

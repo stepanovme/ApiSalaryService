@@ -361,3 +361,73 @@ class AllowedDeviceCreate(SalarySchema):
 class AllowedDeviceUpdate(SalarySchema):
     owner_name: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class ExtractType(StrEnum):
+    salary = "salary"
+    report = "report"
+    vacation = "vacation"
+    extract = "extract"
+
+
+class ExtractCreate(SalarySchema):
+    type: ExtractType
+    date: Optional[date] = None
+    counterparties_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+
+
+class ExtractUpdate(SalarySchema):
+    type: Optional[ExtractType] = None
+    date: Optional[date] = None
+    counterparties_id: Optional[str] = None
+
+
+class ExtractItemCreate(SalarySchema):
+    id: Optional[str] = None
+    extract_id: int
+    num: int
+    fio: str
+    employee_id: Optional[str] = None
+    account_num: Optional[str] = None
+    bik: Optional[str] = None
+    withheld: Optional[float] = None
+    sum: Optional[float] = None
+    result: Optional[str] = None
+    comment_result: Optional[str] = None
+    consider: Optional[bool] = None
+
+
+class ExtractItemUpdate(SalarySchema):
+    num: Optional[int] = None
+    fio: Optional[str] = None
+    employee_id: Optional[str] = None
+    account_num: Optional[str] = None
+    bik: Optional[str] = None
+    withheld: Optional[float] = None
+    sum: Optional[float] = None
+    result: Optional[str] = None
+    comment_result: Optional[str] = None
+    consider: Optional[bool] = None
+
+
+class ExtractFilesCreate(SalarySchema):
+    id: Optional[str] = None
+    extract_id: int
+    original_name: str
+    storage_name: str
+    extension: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_path: str
+    uploaded_by: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+
+
+class ExtractFilesUpdate(SalarySchema):
+    extract_id: Optional[int] = None
+    original_name: Optional[str] = None
+    storage_name: Optional[str] = None
+    extension: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_path: Optional[str] = None
