@@ -329,7 +329,7 @@ for sheet_name in wb.sheetnames:
         if ogrn:
             row = self.reference_db.execute(
                 text(
-                    "SELECT counterparty_id FROM details_llc WHERE ogrn = :ogrn LIMIT 1"
+                    "SELECT counterparties_id FROM details_llc WHERE ogrn = :ogrn LIMIT 1"
                 ),
                 {"ogrn": ogrn},
             ).first()
