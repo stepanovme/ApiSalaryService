@@ -406,6 +406,10 @@ class SalaryService:
         advance = self._sum_operations_salary(employee_id, mounth_period, year, 5)
         bonus = self._sum_operations_salary(employee_id, mounth_period, year, 7)
         buh_total = self._sum_buh_salary(employee_id, mounth_period, year)
+        if buh_total == 0:
+            buh_total = self._sum_operations_salary(
+                employee_id, mounth_period, year, 1
+            ) + self._sum_operations_salary(employee_id, mounth_period, year, 2)
         vacation_buh = self._sum_buh_salary(employee_id, mounth_period, year, 4)
         vacation_ev = vacation_total - vacation_buh
         paid_total = buh_total + self._sum_operations_salary(employee_id, mounth_period, year, exclude_type_ids=[1, 2, 3, 4, 7])
