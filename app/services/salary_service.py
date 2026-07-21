@@ -139,7 +139,7 @@ class SalaryService:
                     ON os.employee_id = e.id
                     AND os.nounth_period = :mounth_period
                     AND os.year = :year
-                    AND os.type_id = bs.type_id
+                    AND (bs.id IS NULL OR os.type_id = bs.type_id)
                 WHERE eh.start_date <= :period_end
                   AND (eh.end_date IS NULL OR eh.end_date >= :period_start)
                 GROUP BY
