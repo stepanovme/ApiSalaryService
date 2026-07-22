@@ -916,17 +916,12 @@ def _cleanup_sberbank_cert():
             os.unlink(path)
 
 
-@salary_router.get(
-    "/bank-accounts/balance",
-    tags=["Банковские счета"],
-    summary="Баланс и обороты по счёту из Sberbank API",
-)
-async def get_bank_account_balance(
+async def _sberbank_request(
+    endpoint: str,
     account_number: str,
     statement_date: str | None = None,
-    current_session: AuthenticatedSession = Depends(get_session),
-):
-    _ = current_session
+    extra_params: dict[str, Any] | None = None,
+) -> Any:
     host = os.getenv("SBERBANK_API_HOST")
     if not host:
         raise HTTPException(status_code=500, detail="SBERBANK_API_HOST not configured")
@@ -936,9 +931,11 @@ async def get_bank_account_balance(
         raise HTTPException(status_code=500, detail="SBERBANK_API_TOKEN not configured")
 
     cert_path, key_path = _sberbank_pfx_cert()
-    params = {"accountNumber": account_number}
+    params: dict[str, Any] = {"accountNumber": account_number}
     if statement_date:
         params["statementDate"] = statement_date
+    if extra_params:
+        params.update(extra_params)
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -951,7 +948,7 @@ async def get_bank_account_balance(
     ) as client:
         try:
             resp = await client.get(
-                f"{host}/fintech/api/v2/statement/summary",
+                f"{host}/fintech/api/v2/{endpoint}",
                 params=params,
                 headers=headers,
             )
@@ -966,6 +963,45 @@ async def get_bank_account_balance(
             raise HTTPException(
                 status_code=502, detail=f"Sberbank API error: {exc}"
             ) from exc
+
+
+@salary_router.get(
+    "/bank-accounts/balance",
+    tags=["Банковские счета"],
+    summary="Баланс и обороты по счёту из Sberbank API",
+)
+async def get_bank_account_balance(
+    account_number: str,
+    statement_date: str | None = None,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    return await _sberbank_request(
+        endpoint="statement/summary",
+        account_number=account_number,
+        statement_date=statement_date,
+    )
+
+
+@salary_router.get(
+    "/bank-accounts/transactions",
+    tags=["Банковские счета"],
+    summary="История операций по счёту из Sberbank API",
+)
+async def get_bank_account_transactions(
+    account_number: str,
+    statement_date: str | None = None,
+    page: int = 1,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    params = {"page": page}
+    return await _sberbank_request(
+        endpoint="statement/transactions",
+        account_number=account_number,
+        statement_date=statement_date,
+        extra_params=params,
+    )
 
 
 crud_resources: list[dict[str, Any]] = [
