@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import uuid
 from datetime import datetime
@@ -845,6 +846,45 @@ def _ascii_download_name(file_name: str) -> str:
     if suffix and not fallback.endswith(suffix):
         fallback = f"{fallback}{suffix}"
     return fallback
+
+
+@salary_router.get(
+    "/bank-accounts/balance",
+    tags=["Банковские счета"],
+    summary="Баланс и обороты по счёту из Sberbank API",
+)
+async def get_bank_account_balance(
+    account_number: str,
+    statement_date: str | None = None,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    token = os.getenv("SBERBANK_API_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="SBERBANK_API_TOKEN not configured")
+
+    params = {"accountNumber": account_number}
+    if statement_date:
+        params["statementDate"] = statement_date
+
+    async with httpx.AsyncClient(verify=False, timeout=30) as client:
+        try:
+            resp = await client.get(
+                "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/summary",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=exc.response.status_code,
+                detail=f"Sberbank API error: {exc.response.text}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Sberbank API error: {exc}"
+            ) from exc
 
 
 crud_resources: list[dict[str, Any]] = [
