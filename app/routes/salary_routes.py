@@ -931,10 +931,20 @@ async def get_bank_account_balance(
     if not host:
         raise HTTPException(status_code=500, detail="SBERBANK_API_HOST not configured")
 
+    token = os.getenv("SBERBANK_API_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="SBERBANK_API_TOKEN not configured")
+
     cert_path, key_path = _sberbank_pfx_cert()
     params = {"accountNumber": account_number}
     if statement_date:
         params["statementDate"] = statement_date
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
 
     async with httpx.AsyncClient(
         verify=False, cert=(cert_path, key_path), timeout=30
@@ -943,6 +953,7 @@ async def get_bank_account_balance(
             resp = await client.get(
                 f"{host}/fintech/api/v2/statement/summary",
                 params=params,
+                headers=headers,
             )
             resp.raise_for_status()
             return resp.json()
