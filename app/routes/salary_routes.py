@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime
 from typing import Any
@@ -8,6 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import httpx
+from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from sqlalchemy import text
@@ -848,6 +850,36 @@ def _ascii_download_name(file_name: str) -> str:
     return fallback
 
 
+def _sberbank_pfx_cert() -> tuple[str, str]:
+    pfx_path = os.getenv("SBERBANK_PFX_PATH")
+    passphrase = os.getenv("SBERBANK_PFX_PASSPHRASE")
+    if not pfx_path or not os.path.exists(pfx_path):
+        raise HTTPException(status_code=500, detail="SBERBANK_PFX_PATH not configured or not found")
+
+    with open(pfx_path, "rb") as f:
+        pfx_data = f.read()
+
+    private_key, certificate, _ = pkcs12.load_key_and_certificates(
+        pfx_data, passphrase.encode() if passphrase else None
+    )
+    if not certificate or not private_key:
+        raise HTTPException(status_code=500, detail="Failed to load cert/key from PFX")
+
+    cert_pem = certificate.public_bytes(Encoding.PEM)
+    key_pem = private_key.private_bytes(
+        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()
+    )
+
+    cert_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="wb")
+    cert_file.write(cert_pem)
+    cert_file.close()
+    key_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="wb")
+    key_file.write(key_pem)
+    key_file.close()
+
+    return cert_file.name, key_file.name
+
+
 @salary_router.get(
     "/bank-accounts/balance",
     tags=["Банковские счета"],
@@ -859,20 +891,22 @@ async def get_bank_account_balance(
     current_session: AuthenticatedSession = Depends(get_session),
 ):
     _ = current_session
-    token = os.getenv("SBERBANK_API_TOKEN")
-    if not token:
-        raise HTTPException(status_code=500, detail="SBERBANK_API_TOKEN not configured")
+    host = os.getenv("SBERBANK_API_HOST")
+    if not host:
+        raise HTTPException(status_code=500, detail="SBERBANK_API_HOST not configured")
 
+    cert_path, key_path = _sberbank_pfx_cert()
     params = {"accountNumber": account_number}
     if statement_date:
         params["statementDate"] = statement_date
 
-    async with httpx.AsyncClient(verify=False, timeout=30) as client:
+    async with httpx.AsyncClient(
+        verify=False, cert=(cert_path, key_path), timeout=30
+    ) as client:
         try:
             resp = await client.get(
-                "https://fintech.sberbank.ru:9443/fintech/api/v2/statement/summary",
+                f"{host}/fintech/api/v2/statement/summary",
                 params=params,
-                headers={"Authorization": f"Bearer {token}"},
             )
             resp.raise_for_status()
             return resp.json()
