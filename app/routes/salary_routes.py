@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import os
 import re
 import tempfile
@@ -850,20 +851,45 @@ def _ascii_download_name(file_name: str) -> str:
     return fallback
 
 
+_sberbank_cert_path: str | None = None
+_sberbank_key_path: str | None = None
+
+
 def _sberbank_pfx_cert() -> tuple[str, str]:
+    global _sberbank_cert_path, _sberbank_key_path
+
+    if _sberbank_cert_path and _sberbank_key_path:
+        return _sberbank_cert_path, _sberbank_key_path
+
     pfx_path = os.getenv("SBERBANK_PFX_PATH")
     passphrase = os.getenv("SBERBANK_PFX_PASSPHRASE")
-    if not pfx_path or not os.path.exists(pfx_path):
-        raise HTTPException(status_code=500, detail="SBERBANK_PFX_PATH not configured or not found")
+    if not pfx_path:
+        raise HTTPException(status_code=500, detail="SBERBANK_PFX_PATH not configured")
+    if not os.path.exists(pfx_path):
+        raise HTTPException(
+            status_code=500,
+            detail=f"SBERBANK_PFX_PATH not found: {pfx_path}",
+        )
 
     with open(pfx_path, "rb") as f:
         pfx_data = f.read()
 
-    private_key, certificate, _ = pkcs12.load_key_and_certificates(
-        pfx_data, passphrase.encode() if passphrase else None
-    )
+    try:
+        pfx_password = passphrase.encode() if passphrase else None
+        private_key, certificate, _ = pkcs12.load_key_and_certificates(
+            pfx_data, pfx_password
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse PFX (check format or passphrase): {exc}",
+        ) from exc
+
     if not certificate or not private_key:
-        raise HTTPException(status_code=500, detail="Failed to load cert/key from PFX")
+        raise HTTPException(
+            status_code=500,
+            detail="PFX contains no certificate or private key",
+        )
 
     cert_pem = certificate.public_bytes(Encoding.PEM)
     key_pem = private_key.private_bytes(
@@ -873,11 +899,21 @@ def _sberbank_pfx_cert() -> tuple[str, str]:
     cert_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="wb")
     cert_file.write(cert_pem)
     cert_file.close()
+    _sberbank_cert_path = cert_file.name
+
     key_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pem", mode="wb")
     key_file.write(key_pem)
     key_file.close()
+    _sberbank_key_path = key_file.name
 
-    return cert_file.name, key_file.name
+    return _sberbank_cert_path, _sberbank_key_path
+
+
+@atexit.register
+def _cleanup_sberbank_cert():
+    for path in (_sberbank_cert_path, _sberbank_key_path):
+        if path and os.path.exists(path):
+            os.unlink(path)
 
 
 @salary_router.get(
