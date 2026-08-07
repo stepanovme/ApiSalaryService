@@ -127,39 +127,15 @@ class SalaryService:
                     bs.type_id,
                     bs.created_by,
                     bs.edit_by,
-                    bs.created_at,
-                    COALESCE(SUM(os.value), 0) AS paid_value
+                    bs.created_at
                 FROM employment_history eh
                 JOIN employee e ON e.id = eh.employee_id
                 LEFT JOIN buh_salary bs
                     ON bs.employee_id = e.id
                     AND bs.mounth_period = :mounth_period
                     AND bs.year = :year
-                LEFT JOIN operations_salary os
-                    ON os.employee_id = e.id
-                    AND os.nounth_period = :mounth_period
-                    AND os.year = :year
-                    AND (bs.id IS NULL OR os.type_id = bs.type_id)
                 WHERE eh.start_date <= :period_end
                   AND (eh.end_date IS NULL OR eh.end_date >= :period_start)
-                GROUP BY
-                    eh.counterparties_id,
-                    eh.department,
-                    eh.position,
-                    eh.start_date,
-                    eh.end_date,
-                    e.id,
-                    e.name,
-                    e.surname,
-                    e.patronymic,
-                    e.userId,
-                    e.marker,
-                    bs.id,
-                    bs.value,
-                    bs.type_id,
-                    bs.created_by,
-                    bs.edit_by,
-                    bs.created_at
                 ORDER BY eh.counterparties_id, e.surname, e.name, bs.type_id
                 """
             ),
@@ -171,7 +147,29 @@ class SalaryService:
             },
         ).mappings().all()
 
+        ops_rows = self.db.execute(
+            text(
+                """
+                SELECT employee_id, type_id, SUM(value) AS paid
+                FROM operations_salary
+                WHERE nounth_period = :mounth_period AND year = :year
+                GROUP BY employee_id, type_id
+                """
+            ),
+            {
+                "mounth_period": mounth_period,
+                "year": year,
+            },
+        ).mappings().all()
+
+        ops_map: dict[str, dict[int, float]] = {}
+        for ops_row in ops_rows:
+            ops_map.setdefault(ops_row["employee_id"], {})[
+                ops_row["type_id"]
+            ] = float(ops_row["paid"])
+
         grouped: dict[str, dict[str, Any]] = {}
+        covered_by_buh: dict[str, set[int]] = {}
         for row in rows:
             counterparty_id = row["counterparties_id"]
             group = grouped.setdefault(
@@ -190,7 +188,11 @@ class SalaryService:
 
             employee = self._serialize_report_employee(row)
             accrued_value = float(row["accrued_value"] or 0)
-            paid_value = float(row["paid_value"] or 0)
+            paid_value = (
+                ops_map.get(row["employee_id"], {}).get(row["type_id"], 0)
+                if row["buh_salary_id"]
+                else 0
+            )
             remaining_value = accrued_value - paid_value
             employee_item = group["employees"].setdefault(
                 employee["id"],
@@ -226,32 +228,27 @@ class SalaryService:
                         "created_at": row["created_at"],
                     }
                 )
-            elif paid_value > 0:
-                ops_rows = self.db.execute(
-                    text(
-                        """
-                        SELECT type_id, SUM(value) AS paid
-                        FROM operations_salary
-                        WHERE employee_id = :employee_id
-                          AND nounth_period = :mounth_period
-                          AND year = :year
-                        GROUP BY type_id
-                        """
-                    ),
-                    {
-                        "employee_id": row["employee_id"],
-                        "mounth_period": mounth_period,
-                        "year": year,
-                    },
-                ).mappings().all()
-                for ops_row in ops_rows:
-                    ops_paid = float(ops_row["paid"])
+                covered_by_buh.setdefault(row["employee_id"], set()).add(row["type_id"])
+            employee_item["total_accrued"] += accrued_value
+            employee_item["total_paid"] += paid_value
+            employee_item["total_remaining"] += remaining_value
+            group["total_accrued"] += accrued_value
+            group["total_paid"] += paid_value
+            group["total_remaining"] += remaining_value
+
+        for group in grouped.values():
+            for employee_item in group["employees"].values():
+                employee_id = employee_item["employee"]["id"]
+                covered = covered_by_buh.get(employee_id, set())
+                for type_id, ops_paid in ops_map.get(employee_id, {}).items():
+                    if type_id in covered:
+                        continue
                     employee_item["accruals"].append(
                         {
                             "buh_salary_id": None,
-                            "type_id": ops_row["type_id"],
+                            "type_id": type_id,
                             "type_name": self._get_named_salary_row(
-                                "type", "id", ops_row["type_id"]
+                                "type", "id", type_id
                             ),
                             "accrued_value": 0,
                             "paid_value": ops_paid,
@@ -263,14 +260,10 @@ class SalaryService:
                             "created_at": None,
                         }
                     )
-            employee_item["total_accrued"] += accrued_value
-            employee_item["total_paid"] += paid_value
-            employee_item["total_remaining"] += remaining_value
-            group["total_accrued"] += accrued_value
-            group["total_paid"] += paid_value
-            group["total_remaining"] += remaining_value
-
-        for group in grouped.values():
+                    employee_item["total_paid"] += ops_paid
+                    employee_item["total_remaining"] -= ops_paid
+                    group["total_paid"] += ops_paid
+                    group["total_remaining"] -= ops_paid
             group["employees"] = list(group["employees"].values())
 
         return {
