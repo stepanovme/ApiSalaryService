@@ -743,6 +743,55 @@ def download_extract_file(
     )
 
 
+@salary_router.get(
+    "/extract-files/{file_id}/preview",
+    tags=["Файлы выписок"],
+    summary="Предпросмотр файла (inline)",
+)
+def preview_extract_file(
+    file_id: str,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    row = db.execute(
+        text("SELECT * FROM extract_files WHERE id = :file_id LIMIT 1"),
+        {"file_id": file_id},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    file_path = Path(row["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Файл отсутствует на диске")
+    return FileResponse(
+        path=file_path,
+        media_type=row["mime_type"] or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{row["original_name"]}"'
+        },
+    )
+
+
+@salary_router.get(
+    "/extracts/{extract_id}/files",
+    tags=["Файлы выписок"],
+    summary="Список файлов выписки по id выписки",
+)
+def list_extract_files_by_extract(
+    extract_id: int,
+    db: DbSession,
+    current_session: AuthenticatedSession = Depends(get_session),
+):
+    _ = current_session
+    rows = db.execute(
+        text(
+            "SELECT * FROM extract_files WHERE extract_id = :extract_id ORDER BY uploaded_at DESC"
+        ),
+        {"extract_id": extract_id},
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 @salary_router.patch(
     "/extract-files/{file_id}",
     tags=["Файлы выписок"],
