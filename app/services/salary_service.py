@@ -793,11 +793,11 @@ class SalaryService:
         rows = self.timetrack_db.execute(
             text(
                 """
-                SELECT start_date, end_date
+                SELECT total_days
                 FROM vacations
                 WHERE user_id = :user_id
-                  AND start_date <= :period_end
-                  AND end_date >= :period_start
+                  AND start_date BETWEEN :period_start AND :period_end
+                  AND status = 'approved'
                 """
             ),
             {
@@ -806,12 +806,7 @@ class SalaryService:
                 "period_end": period_end,
             },
         ).mappings().all()
-        total_days = 0
-        for row in rows:
-            start_date = max(self._as_date(row["start_date"]), period_start)
-            end_date = min(self._as_date(row["end_date"]), period_end)
-            total_days += (end_date - start_date).days + 1
-        return total_days
+        return sum(int(row["total_days"]) for row in rows)
 
     def _get_sick_days(self, user_id: str, period_start: date, period_end: date) -> int | None:
         if self.timetrack_db is None:
