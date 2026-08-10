@@ -407,6 +407,10 @@ class SalaryService:
             buh_total = ops_salary
             buh_from_ops = True
         vacation_buh = self._sum_buh_salary(employee_id, mounth_period, year, 4)
+        if vacation_buh == 0:
+            vacation_buh = self._sum_operations_salary(
+                employee_id, mounth_period, year, 4
+            )
         vacation_ev = vacation_total - vacation_buh
         ops_other = self._sum_operations_salary(employee_id, mounth_period, year, exclude_type_ids=[1, 2, 3, 4, 7])
         if buh_from_ops:
